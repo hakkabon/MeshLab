@@ -40,19 +40,26 @@ public struct FEMModel: Sendable {
     /// Acceleration applied to every element, typically gravity. The
     /// distributed force is `density * bodyForce * measure`.
     public var bodyForce: SIMD3<Double>
+    /// Per-node temperature change relative to the stress-free reference
+    /// temperature. When non-empty, the static solve adds the equivalent
+    /// thermal load and subtracts the free thermal strain during stress
+    /// recovery. Thermal stress coupling currently requires a 3D mesh.
+    public var temperatureChange: [Double]
 
     public init(
         mesh: Mesh,
         material: ElasticMaterial,
         constraints: [DirichletCondition],
         loads: [Load] = [],
-        bodyForce: SIMD3<Double> = .zero
+        bodyForce: SIMD3<Double> = .zero,
+        temperatureChange: [Double] = []
     ) {
         self.mesh = mesh
         self.material = material
         self.constraints = constraints
         self.loads = loads
         self.bodyForce = bodyForce
+        self.temperatureChange = temperatureChange
     }
 
     public func globalDOF(node: Int, axis: Int) -> Int {
@@ -118,19 +125,23 @@ public struct StaticAnalysis: Sendable {
             throw FEMError.invalidModel("At least one Dirichlet constraint is required")
         }
 
-        let prescribed = try makePrescribedMap(
+        let prescribed = try FEMAssembly.prescribedMap(
             model.constraints,
             nodeCount: mesh.nodes.count,
             dimension: dimension
         )
-        try validateConstraintCoverage(
+        try FEMAssembly.validateConstraintCoverage(
             mesh: mesh,
             prescribed: prescribed,
             dimension: dimension
         )
 
         var rightHandSide = [Double](repeating: 0, count: mesh.dofCount)
-        try applyLoads(model, dimension: dimension, into: &rightHandSide)
+        try FEMAssembly.applyLoads(
+            model,
+            dimension: dimension,
+            into: &rightHandSide
+        )
 
         var triplets: [SparseTriplet] = []
         triplets.reserveCapacity(mesh.elements.count * 64)
@@ -172,15 +183,23 @@ public struct StaticAnalysis: Sendable {
             }
         }
 
+        let thermal = try FEMAssembly.thermalLoads(
+            model,
+            kinematics: kinematics
+        )
+        for dof in rightHandSide.indices {
+            rightHandSide[dof] += thermal.loads[dof]
+        }
+
         let stiffness = try SparseMatrix.symmetric(
             size: mesh.dofCount,
             lowerTriplets: triplets
         )
 
-        let freeDOFs = (0..<mesh.dofCount).filter { prescribed[$0] == nil }
-        guard !freeDOFs.isEmpty else {
-            throw FEMError.noFreeDegreesOfFreedom
-        }
+        let freeDOFs = try FEMAssembly.freeDOFs(
+            count: mesh.dofCount,
+            prescribed: prescribed
+        )
 
         let unsupported = freeDOFs.filter {
             let diagonal = stiffness.value(atRow: $0, column: $0)
@@ -283,10 +302,13 @@ public struct StaticAnalysis: Sendable {
         elementStresses.reserveCapacity(mesh.elements.count)
         var maxVonMises = 0.0
 
-        for data in kinematics {
+        for (index, data) in kinematics.enumerated() {
             let localDOFs = model.elementDOFs(data.elementIndex)
             let localDisplacement = localDOFs.map { globalSolution[$0] }
-            let stress = data.stress(localDisplacement: localDisplacement)
+            let stress = data.stress(
+                localDisplacement: localDisplacement,
+                initialStrain: thermal.strains[index]
+            )
             let vonMises = ElementKinematics.vonMises(stress: stress)
             maxVonMises = max(maxVonMises, vonMises)
             elementStresses.append(ElementStress(
@@ -317,137 +339,6 @@ public struct StaticAnalysis: Sendable {
             maxDisplacement: maxDisplacement,
             maxVonMises: maxVonMises
         )
-    }
-
-    private func makePrescribedMap(
-        _ constraints: [DirichletCondition],
-        nodeCount: Int,
-        dimension: Int
-    ) throws -> [Int: Double] {
-        var prescribed: [Int: Double] = [:]
-        for condition in constraints {
-            guard (0..<nodeCount).contains(condition.node) else {
-                throw FEMError.invalidConstraint(dof: condition.node)
-            }
-            guard condition.value.isFinite else {
-                throw FEMError.invalidConstraint(dof: condition.node)
-            }
-
-            let axes: [Int]
-            if let axis = condition.axis {
-                guard (0..<dimension).contains(axis) else {
-                    throw FEMError.invalidConstraint(dof: condition.node * dimension + axis)
-                }
-                axes = [axis]
-            } else {
-                axes = Array(0..<dimension)
-            }
-
-            for axis in axes {
-                let dof = condition.node * dimension + axis
-                if let existing = prescribed[dof], existing != condition.value {
-                    throw FEMError.conflictingConstraint(dof: dof)
-                }
-                prescribed[dof] = condition.value
-            }
-        }
-        return prescribed
-    }
-
-    private func applyLoads(
-        _ model: FEMModel,
-        dimension: Int,
-        into rightHandSide: inout [Double]
-    ) throws {
-        for load in model.loads {
-            switch load {
-            case .nodal(let node, let vector):
-                guard (0..<model.mesh.nodes.count).contains(node) else {
-                    throw FEMError.invalidLoad("Nodal load references node \(node)")
-                }
-                guard vector.x.isFinite, vector.y.isFinite, vector.z.isFinite else {
-                    throw FEMError.invalidLoad("Nodal load has a non-finite component")
-                }
-                if dimension == 2, vector.z != 0 {
-                    throw FEMError.invalidLoad("A two-dimensional model cannot carry an out-of-plane nodal load")
-                }
-                for axis in 0..<dimension {
-                    rightHandSide[node * dimension + axis] += vector[axis]
-                }
-
-            case .traction(let nodes, let vector):
-                guard dimension == 3 else {
-                    throw FEMError.invalidLoad("Traction loads require a three-dimensional model")
-                }
-                guard nodes.count == 3, Set(nodes).count == 3,
-                      nodes.allSatisfy({ (0..<model.mesh.nodes.count).contains($0) }) else {
-                    throw FEMError.invalidLoad("A traction face needs three distinct valid nodes")
-                }
-                guard vector.x.isFinite, vector.y.isFinite, vector.z.isFinite else {
-                    throw FEMError.invalidLoad("Traction load has a non-finite component")
-                }
-                let p0 = model.mesh.nodes[nodes[0]]
-                let p1 = model.mesh.nodes[nodes[1]]
-                let p2 = model.mesh.nodes[nodes[2]]
-                let area = 0.5 * simd_length(simd_cross(p1 - p0, p2 - p0))
-                guard area > 1e-15 else {
-                    throw FEMError.invalidLoad("Traction face is degenerate")
-                }
-                let force = vector * (area / 3)
-                for node in nodes {
-                    let base = node * dimension
-                    rightHandSide[base] += force.x
-                    rightHandSide[base + 1] += force.y
-                    rightHandSide[base + 2] += force.z
-                }
-            }
-        }
-    }
-
-    private func validateConstraintCoverage(
-        mesh: Mesh,
-        prescribed: [Int: Double],
-        dimension: Int
-    ) throws {
-        var parent = Array(0..<mesh.nodes.count)
-
-        func find(_ node: Int) -> Int {
-            var node = node
-            while parent[node] != node {
-                parent[node] = parent[parent[node]]
-                node = parent[node]
-            }
-            return node
-        }
-
-        func union(_ first: Int, _ second: Int) {
-            let firstRoot = find(first)
-            let secondRoot = find(second)
-            if firstRoot != secondRoot {
-                parent[secondRoot] = firstRoot
-            }
-        }
-
-        for element in mesh.elements {
-            for node in element.nodes.dropFirst() {
-                union(element.nodes[0], node)
-            }
-        }
-
-        var constrainedComponents = Set<Int>()
-        for dof in prescribed.keys {
-            constrainedComponents.insert(find(dof / dimension))
-        }
-
-        var unconstrainedDOFs: [Int] = []
-        for node in mesh.nodes.indices where !constrainedComponents.contains(find(node)) {
-            for axis in 0..<dimension {
-                unconstrainedDOFs.append(node * dimension + axis)
-            }
-        }
-        if !unconstrainedDOFs.isEmpty {
-            throw FEMError.unconstrainedDegreesOfFreedom(unconstrainedDOFs)
-        }
     }
 
     private func reduce(

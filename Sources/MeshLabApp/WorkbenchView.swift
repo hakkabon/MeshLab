@@ -34,7 +34,7 @@ struct WorkbenchView: View {
                     Button("Export Results CSV…") {
                         isExportingResults = true
                     }
-                    .disabled(model.result == nil || model.needsSolve)
+                    .disabled(!model.hasResults || model.needsSolve)
                 } label: {
                     Label("Export", systemImage: "square.and.arrow.up")
                 }
@@ -101,6 +101,52 @@ struct WorkbenchView: View {
                 LabeledContent("DOFs", value: "\(model.project.mesh.dofCount)")
             }
 
+            Section("Analysis") {
+                Picker(
+                    "Type",
+                    selection: Binding(
+                        get: { model.project.analysis },
+                        set: { model.setAnalysis($0) }
+                    )
+                ) {
+                    ForEach(AnalysisKind.allCases, id: \.self) { kind in
+                        Text(kind.title).tag(kind)
+                    }
+                }
+                if model.project.analysis == .modal {
+                    Stepper(
+                        "Modes: \(model.project.modalModeCount)",
+                        value: Binding(
+                            get: { model.project.modalModeCount },
+                            set: { model.setModalModeCount($0) }
+                        ),
+                        in: 1...50
+                    )
+                }
+                if model.project.analysis == .thermalStructural {
+                    LabeledContent(
+                        "Thermal BCs",
+                        value: "\(model.project.thermalStudy.constraints.count)"
+                    )
+                    LabeledContent(
+                        "Reference",
+                        value: String(
+                            format: "%.3g K",
+                            model.project.thermalStudy.referenceTemperature
+                        )
+                    )
+                    LabeledContent(
+                        "Peak BC",
+                        value: String(
+                            format: "%.3g K",
+                            model.project.thermalStudy.constraints
+                                .map(\.temperature)
+                                .max() ?? 0
+                        )
+                    )
+                }
+            }
+
             Section("Material") {
                 LabeledContent("E (GPa)") {
                     TextField(
@@ -135,9 +181,36 @@ struct WorkbenchView: View {
                     )
                     .multilineTextAlignment(.trailing)
                 }
+                LabeledContent("k (W/m·K)") {
+                    TextField(
+                        "Conductivity",
+                        value: Binding(
+                            get: { model.project.material.thermalConductivity },
+                            set: { model.setThermalConductivity($0) }
+                        ),
+                        format: .number.precision(.fractionLength(0...2))
+                    )
+                    .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("α (1/K)") {
+                    TextField(
+                        "Expansion",
+                        value: Binding(
+                            get: { model.project.material.thermalExpansion },
+                            set: { model.setThermalExpansion($0) }
+                        ),
+                        format: .number.precision(.fractionLength(0...8))
+                    )
+                    .multilineTextAlignment(.trailing)
+                }
             }
 
             Section("Loads") {
+                if model.project.analysis == .modal {
+                    Text("Modal analysis ignores mechanical loads.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 LabeledContent("Scale", value: String(format: "%.2f×", model.project.loadScale))
                 Slider(
                     value: Binding(
@@ -194,6 +267,7 @@ struct WorkbenchView: View {
                         set: { model.setShowStress($0) }
                     )
                 )
+                .disabled(model.project.analysis == .modal)
                 LabeledContent(
                     "Deformation",
                     value: String(format: "%.0f×", model.project.deformationScale)
@@ -208,29 +282,65 @@ struct WorkbenchView: View {
             }
 
             Section("Results") {
-                if let result = model.result {
-                    LabeledContent(
-                        "Max displacement",
-                        value: String(format: "%.4g mm", result.maxDisplacement * 1_000)
-                    )
-                    LabeledContent(
-                        "Max von Mises",
-                        value: String(format: "%.4g MPa", result.maxVonMises / 1e6)
-                    )
-                    LabeledContent(
-                        "Strain energy",
-                        value: String(format: "%.4g J", result.strainEnergy)
-                    )
-                    LabeledContent(
-                        "Solve time",
-                        value: model.lastSolveSeconds.map {
-                            String(format: "%.1f ms", $0 * 1_000)
-                        } ?? "—"
-                    )
-                    LabeledContent("Solver", value: solverSummary(result.solveReport))
-                } else {
-                    Text(model.isSolving ? "Solving…" : "Run an analysis to see results.")
-                        .foregroundStyle(.secondary)
+                switch model.project.analysis {
+                case .staticAnalysis:
+                    if let result = model.result {
+                        staticResultRows(result)
+                    } else {
+                        emptyResults
+                    }
+                case .modal:
+                    if let modalResult = model.modalResult {
+                        Picker(
+                            "Mode",
+                            selection: Binding(
+                                get: { model.project.selectedMode },
+                                set: { model.setSelectedMode($0) }
+                            )
+                        ) {
+                            ForEach(modalResult.modes.indices, id: \.self) { index in
+                                let mode = modalResult.modes[index]
+                                Text(String(
+                                    format: "%d · %.4g Hz",
+                                    mode.index + 1,
+                                    mode.frequencyHz
+                                )).tag(mode.index)
+                            }
+                        }
+                        if let mode = model.selectedMode {
+                            LabeledContent(
+                                "Frequency",
+                                value: String(format: "%.6g Hz", mode.frequencyHz)
+                            )
+                            LabeledContent(
+                                "Angular",
+                                value: String(format: "%.6g rad/s", mode.angularFrequency)
+                            )
+                            LabeledContent(
+                                "Mass residual",
+                                value: String(format: "%.2g", mode.relativeResidual)
+                            )
+                        }
+                        LabeledContent(
+                            "Solve time",
+                            value: model.lastSolveSeconds.map {
+                                String(format: "%.1f ms", $0 * 1_000)
+                            } ?? "—"
+                        )
+                    } else {
+                        emptyResults
+                    }
+                case .thermalStructural:
+                    if let thermalResult = model.thermalResult,
+                       let result = model.result {
+                        LabeledContent(
+                            "Max temperature",
+                            value: String(format: "%.4g K", thermalResult.maximumTemperature)
+                        )
+                        staticResultRows(result)
+                    } else {
+                        emptyResults
+                    }
                 }
             }
 
@@ -248,6 +358,34 @@ struct WorkbenchView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private func staticResultRows(_ result: StaticResult) -> some View {
+        LabeledContent(
+            "Max displacement",
+            value: String(format: "%.4g mm", result.maxDisplacement * 1_000)
+        )
+        LabeledContent(
+            "Max von Mises",
+            value: String(format: "%.4g MPa", result.maxVonMises / 1e6)
+        )
+        LabeledContent(
+            "Strain energy",
+            value: String(format: "%.4g J", result.strainEnergy)
+        )
+        LabeledContent(
+            "Solve time",
+            value: model.lastSolveSeconds.map {
+                String(format: "%.1f ms", $0 * 1_000)
+            } ?? "—"
+        )
+        LabeledContent("Solver", value: solverSummary(result.solveReport))
+    }
+
+    private var emptyResults: some View {
+        Text(model.isSolving ? "Solving…" : "Run an analysis to see results.")
+            .foregroundStyle(.secondary)
     }
 
     private var viewport: some View {
@@ -281,7 +419,7 @@ struct WorkbenchView: View {
                             .background(.ultraThinMaterial, in: Capsule())
                     }
                     Spacer()
-                    if model.project.showStress, let scene = model.scene {
+                    if model.renderOptions.showStress, let scene = model.scene {
                         StressColorBar(
                             range: scene.stressRange,
                             valueScale: 1e-6,
@@ -322,7 +460,7 @@ struct WorkbenchView: View {
                 .foregroundStyle(.secondary)
             Text(model.project.name)
                 .font(.title2.weight(.semibold))
-            Text("Choose a solver and run the analysis to generate the rendered field.")
+            Text(placeholderDescription)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Button("Solve Analysis") {
@@ -352,8 +490,18 @@ struct WorkbenchView: View {
                 simd_length(inspection.displacement) * 1_000
             ))
             .font(.caption.monospacedDigit())
-            Text(String(format: "σv = %.4g MPa", inspection.vonMises / 1e6))
-                .font(.caption.monospacedDigit())
+            if let vonMises = inspection.vonMises {
+                Text(String(format: "σv = %.4g MPa", vonMises / 1e6))
+                    .font(.caption.monospacedDigit())
+            }
+            if let temperature = inspection.temperature {
+                Text(String(format: "T = %.4g K", temperature))
+                    .font(.caption.monospacedDigit())
+            }
+            if let frequency = inspection.modeFrequency {
+                Text(String(format: "f = %.6g Hz", frequency))
+                    .font(.caption.monospacedDigit())
+            }
             Text(String(
                 format: "x = (%.3g, %.3g, %.3g) m",
                 inspection.position.x,
@@ -368,8 +516,18 @@ struct WorkbenchView: View {
     }
 
     private var resultsCSV: String {
-        guard let result = model.result else { return "" }
-        return AnalysisResultExport.csv(project: model.project, result: result)
+        model.resultsCSV
+    }
+
+    private var placeholderDescription: String {
+        switch model.project.analysis {
+        case .staticAnalysis:
+            return "Choose a solver and run the analysis to generate the rendered stress field."
+        case .modal:
+            return "Run a modal analysis, then inspect the mass-normalized mode shapes."
+        case .thermalStructural:
+            return "Run steady conduction, then inspect the coupled thermal stress field."
+        }
     }
 
     private var tipLoadMagnitude: Double {
@@ -402,5 +560,16 @@ struct WorkbenchView: View {
             parts.append("refine=\(refinement)")
         }
         return parts.joined(separator: " · ")
+    }
+}
+
+
+private extension AnalysisKind {
+    var title: String {
+        switch self {
+        case .staticAnalysis: return "Static"
+        case .modal: return "Modal"
+        case .thermalStructural: return "Thermal structural"
+        }
     }
 }

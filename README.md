@@ -4,10 +4,10 @@ MeshLab is an Apple-native finite-element analysis foundation and Metal viewer
 in progress. It combines Swift geometry and 3D element assembly with the
 NumericCore numerical stack and a real-time Metal renderer.
 
-It provides linear-elastic static analysis of tetrahedral and triangular
-meshes, stress recovery, an interactive Metal viewport, and a SwiftUI product
-slice for opening, solving, inspecting, and exporting projects on macOS and
-iOS.
+It provides linear-elastic static, modal, transient, and steady thermal
+analysis of tetrahedral and triangular meshes, stress recovery, an interactive
+Metal viewport, and a SwiftUI product slice for opening, solving, inspecting,
+and exporting projects on macOS and iOS.
 
 ## Status
 
@@ -40,10 +40,27 @@ P2 (Product slice) is complete:
 - clicking the deformed surface selects a source node for inspection;
 - the viewport includes a stress colorbar matching the Metal heatmap.
 
-The package has 33 tests covering vector/dense/sparse math, mesh topology and
+P3 (Dynamics and multiphysics) is complete for 3D modal, transient, and
+steady thermal-structural analysis:
+
+- tet4/tri3 consistent mass matrices and 3D/2D steady-conduction matrices;
+- constrained generalized modal analysis with mass-normalized mode shapes;
+- average-acceleration Newmark transient dynamics with Rayleigh damping;
+- steady thermal analysis with Dirichlet temperatures, nodal heat, volumetric
+  heat generation, and element heat-flux recovery;
+- one-way thermal-structural coupling through equivalent thermal loads and
+  thermal-strain recovery;
+- project schema v2 with analysis selection, modal display state, thermal
+  study data, and automatic v1 migration;
+- the workbench can switch between static, modal, and thermal-structural
+  studies, inspect mode shapes, and export analysis-specific CSV fields.
+
+The package has 46 tests covering vector/dense/sparse math, mesh topology and
 surface extraction, linear-static FEM equilibrium, solver backends and
-factorization reuse, project files and CSV export, camera math, render-scene
-mapping, stress palettes, surface picking, and Metal pipeline creation.
+factorization reuse, modal/transient dynamics, thermal conduction and thermal
+stress, project files and schema migration, CSV export, camera math,
+render-scene mapping, stress palettes, surface picking, and Metal pipeline
+creation.
 
 ## Architecture
 
@@ -75,7 +92,7 @@ mapping, stress palettes, surface picking, and Metal pipeline creation.
 
 | Target | Responsibility |
 | --- | --- |
-| `MeshLabCore` | Mesh types, structured generators, material models, element kinematics, global assembly, Dirichlet/load handling, static analysis, result fields, solver facade. |
+| `MeshLabCore` | Mesh types, structured generators, material models, element kinematics, global assembly, Dirichlet/load handling, static/modal/transient/thermal analysis, result fields, solver facade. |
 | `MeshLabRender` | Surface extraction consumption, `RenderScene`, orbit camera, Metal pipeline, shared result buffers, `MTKView`/SwiftUI bridges. |
 | `MeshLab` | Umbrella re-export of Core and Render. |
 | `MeshLabApp` | SwiftUI workbench: project import/export, asynchronous solve, inspection, picking, and colorbar. |
@@ -84,11 +101,12 @@ mapping, stress palettes, surface picking, and Metal pipeline creation.
 ### Ownership boundary
 
 MeshLab owns geometry, meshing, 3D element formulations, assembly, rendering,
-and application UX. NumericCore owns numerical algorithms, sparse
-factorization, iterative solvers, nonlinear/time-integration methods,
-optimization, and its own 2D/truss/continuum FEM models. Rust-NumericCore stays
-behind Swift-NumericCore; MeshLab never imports the generated FFI bindings
-directly.
+and application UX. NumericCore owns reusable numerical algorithms, sparse
+factorization, iterative solvers, nonlinear methods, optimization, and its own
+2D/truss/continuum FEM models. The fixed-step structural Newmark path is
+currently a MeshLab adapter pending an upstream contribution (ADR 0005).
+Rust-NumericCore stays behind Swift-NumericCore; MeshLab never imports the
+generated FFI bindings directly.
 
 See [ADR 0001](docs/decisions/0001-numerical-ownership.md) for the full decision
 and its consequences.
@@ -145,6 +163,13 @@ the environment it was captured on.
 - Nodal loads, uniform surface tractions, and body forces.
 - Node/axis Dirichlet constraints with exact prescribed-value elimination.
 - Reactions, strain energy, element stresses, and nodal von Mises averaging.
+- Consistent-mass modal analysis with mass-normalized mode shapes and
+  generalized residual/orthogonality diagnostics.
+- Newmark transient dynamics with Rayleigh damping and load histories.
+- Steady thermal conduction with nodal heat, volumetric heat, and element
+  heat-flux recovery.
+- One-way thermal-structural coupling with equivalent thermal loads and
+  thermal-strain stress recovery.
 - Structured box and rectangle mesh generators.
 - Boundary surface extraction with outward face normals and source-node mapping.
 - Solver selection: Accelerate Cholesky/LDLT, NumericCore Cholesky/LU/LDLT,
@@ -156,8 +181,11 @@ the environment it was captured on.
 ### Workbench
 
 - SwiftUI app with a built-in cantilever example and editable material/loads.
+- Static, modal, and thermal-structural study selection with mode-shape
+  inspection and thermal boundary summary.
 - Solver picker for Accelerate and NumericCore direct/iterative methods.
-- Versioned JSON project import/export; nodal CSV result export.
+- Versioned JSON project import/export (schema v2, v1 migration); static,
+  modal, and thermal CSV result export.
 - Asynchronous solve with progress, cancellation of stale results, and errors.
 - Surface picking resolves the deformed hit point to a source node.
 - Stress colorbar mirrors the Metal five-stop palette.
@@ -173,15 +201,23 @@ the environment it was captured on.
 
 ## Current limitations
 
-- Linear static analysis only; no modal, transient, thermal, nonlinear,
-  contact, buckling, plasticity, or multiphysics analysis yet.
+- Modal analysis uses a dense LAPACK eigensolver, so memory and time grow
+  cubically with the number of free DOFs.
+- Modal and transient analyses require homogeneous Dirichlet constraints.
+- Transient dynamics is a library API only; the workbench does not yet expose
+  load histories or time animation.
+- Thermal-structural coupling is one-way and currently 3D-only. Plane-strain
+  thermal stress needs a separate reduced constitutive treatment.
+- Thermal analysis is steady-state only; convection and radiation are not
+  implemented.
+- No nonlinear statics, contact, buckling, or plasticity yet.
 - Constant-strain `tet4`/`tri3` elements only; no `tet10`, `hex8`, shells, or
   beams.
 - Structured meshes only; no CAD/mesh import, unstructured meshing, quality
   metrics, or adaptivity.
-- No document-based autosave, project migrations, or report generation yet.
+- No document-based autosave or report generation yet.
 - Import is limited to MeshLab project JSON; OBJ/STL/CAD import is not
-  implemented.
+  implemented. Project schema v2 files are not readable by older v1 clients.
 - Rendering lacks clipping, vector glyphs, and time animation.
 - Picking is CPU ray casting and will need a spatial index or GPU picking for
   very large surfaces.
@@ -194,7 +230,7 @@ the environment it was captured on.
 
 ```
 Sources/
-  MeshLabCore/        math, mesh, FEM, generators, project format
+  MeshLabCore/        math, mesh, static/dynamic/thermal FEM, project format
   MeshLabRender/      camera, renderer, SwiftUI bridges, MSL, picking, colorbar
   MeshLab/            umbrella module
   MeshLabApp/         SwiftUI workbench executable
@@ -219,8 +255,10 @@ Scripts/
   3D validation suite, coarse-grained FFI usage.
 - **P2 — Product slice (complete):** SwiftUI app, import/export, asynchronous
   solve, picking, colorbar.
-- **P3 — Physics breadth:** 3D modal/transient, thermal-structural, nonlinear
-  statics, higher-order elements.
+- **P3 — Dynamics and multiphysics (complete):** 3D modal/transient, steady
+  thermal, and one-way thermal-structural coupling.
+- **P3b — Nonlinear and higher-order:** nonlinear statics, `tet10`/`hex8`
+  elements, shells, and beams.
 - **P4 — Design loop:** parametric studies, adjoint sensitivities, shape and
   topology optimization.
 - **P5 — Platform and scale:** GPU/matrix-free paths, cloud sweeps, visionOS,
@@ -228,7 +266,10 @@ Scripts/
 
 ## Contributing
 
-- Keep general numerical algorithms in NumericCore, not in MeshLab.
+- Keep reusable numerical algorithms in NumericCore. MeshLab may keep
+  analysis-specific adapters where NumericCore lacks an equivalent API, such as
+  the fixed-step Newmark path in ADR 0005; contribute generalizable pieces
+  upstream.
 - Only `MeshLabCore` may depend on NumericCore products.
 - Do not import `NCBindings` or generated UniFFI symbols outside the Swift
   package boundary.

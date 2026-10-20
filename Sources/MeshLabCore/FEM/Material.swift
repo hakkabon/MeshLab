@@ -9,22 +9,30 @@ public enum MaterialError: Error, Equatable, Sendable {
     case invalidYoungModulus
     case invalidPoissonRatio
     case invalidDensity
+    case invalidThermalConductivity
+    case invalidThermalExpansion
 }
 
-/// Isotropic linear elastic material.
+/// Isotropic linear elastic material with optional thermal properties.
 public struct ElasticMaterial: Sendable, Hashable, Codable {
     public var youngModulus: Double
     public var poissonRatio: Double
     public var density: Double
     public var planeKinematics: PlaneKinematics
     public var thickness: Double
+    /// Isotropic thermal conductivity in W/(m·K). Zero disables conduction.
+    public var thermalConductivity: Double
+    /// Isotropic coefficient of thermal expansion in 1/K.
+    public var thermalExpansion: Double
 
     public init(
         youngModulus: Double,
         poissonRatio: Double,
         density: Double = 0,
         planeKinematics: PlaneKinematics = .planeStress,
-        thickness: Double = 1
+        thickness: Double = 1,
+        thermalConductivity: Double = 0,
+        thermalExpansion: Double = 0
     ) throws {
         guard youngModulus.isFinite, youngModulus > 0 else {
             throw MaterialError.invalidYoungModulus
@@ -38,11 +46,19 @@ public struct ElasticMaterial: Sendable, Hashable, Codable {
         guard thickness.isFinite, thickness > 0 else {
             throw MaterialError.invalidDensity
         }
+        guard thermalConductivity.isFinite, thermalConductivity >= 0 else {
+            throw MaterialError.invalidThermalConductivity
+        }
+        guard thermalExpansion.isFinite, thermalExpansion >= 0 else {
+            throw MaterialError.invalidThermalExpansion
+        }
         self.youngModulus = youngModulus
         self.poissonRatio = poissonRatio
         self.density = density
         self.planeKinematics = planeKinematics
         self.thickness = thickness
+        self.thermalConductivity = thermalConductivity
+        self.thermalExpansion = thermalExpansion
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -51,6 +67,8 @@ public struct ElasticMaterial: Sendable, Hashable, Codable {
         case density
         case planeKinematics
         case thickness
+        case thermalConductivity
+        case thermalExpansion
     }
 
     public init(from decoder: Decoder) throws {
@@ -60,7 +78,15 @@ public struct ElasticMaterial: Sendable, Hashable, Codable {
             poissonRatio: container.decode(Double.self, forKey: .poissonRatio),
             density: container.decode(Double.self, forKey: .density),
             planeKinematics: container.decode(PlaneKinematics.self, forKey: .planeKinematics),
-            thickness: container.decode(Double.self, forKey: .thickness)
+            thickness: container.decode(Double.self, forKey: .thickness),
+            thermalConductivity: container.decodeIfPresent(
+                Double.self,
+                forKey: .thermalConductivity
+            ) ?? 0,
+            thermalExpansion: container.decodeIfPresent(
+                Double.self,
+                forKey: .thermalExpansion
+            ) ?? 0
         )
     }
 

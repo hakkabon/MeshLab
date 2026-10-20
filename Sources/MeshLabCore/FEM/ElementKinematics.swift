@@ -15,6 +15,9 @@ public struct ElementKinematics: Sendable {
     public let strainCount: Int
     public let bMatrix: [Double]
     public let constitutive: [Double]
+    /// Shape-function gradients in physical coordinates. For triangles the
+    /// third component is zero.
+    public let shapeGradients: [SIMD3<Double>]
     private let outOfPlaneMultiplier: Double
 
     public static func compute(
@@ -65,9 +68,62 @@ public struct ElementKinematics: Sendable {
         return result
     }
 
+    /// Consistent mass matrix for the element, including density and measure.
+    public func mass(density: Double) -> [Double] {
+        precondition(density.isFinite && density >= 0, "Density must be finite and non-negative")
+
+        let nodeCount = nodeIndices.count
+        let dimension = elementType.dimension
+        let denominator = nodeCount == 4 ? 20.0 : 12.0
+        let factor = density * measure / denominator
+        var result = [Double](repeating: 0, count: dofCount * dofCount)
+
+        for first in 0..<nodeCount {
+            for second in 0..<nodeCount {
+                let coefficient = factor * (first == second ? 2 : 1)
+                for axis in 0..<dimension {
+                    let row = first * dimension + axis
+                    let column = second * dimension + axis
+                    result[row * dofCount + column] = coefficient
+                }
+            }
+        }
+        return result
+    }
+
+    /// Steady-conduction element matrix for an isotropic conductivity.
+    public func thermalStiffness(conductivity: Double) -> [Double] {
+        precondition(
+            conductivity.isFinite && conductivity >= 0,
+            "Conductivity must be finite and non-negative"
+        )
+
+        let nodeCount = nodeIndices.count
+        var result = [Double](repeating: 0, count: nodeCount * nodeCount)
+        let factor = conductivity * measure
+        for row in 0..<nodeCount {
+            for column in 0..<nodeCount {
+                result[row * nodeCount + column] = factor
+                    * simd_dot(shapeGradients[row], shapeGradients[column])
+            }
+        }
+        return result
+    }
+
     /// Recovers stress in `[σxx, σyy, σzz, τxy, τyz, τzx]` order.
-    public func stress(localDisplacement: [Double]) -> [Double] {
+    ///
+    /// `initialStrain` is subtracted from the total strain before applying the
+    /// constitutive matrix. Thermal analysis supplies the free thermal strain
+    /// through this argument.
+    public func stress(
+        localDisplacement: [Double],
+        initialStrain: [Double] = []
+    ) -> [Double] {
         precondition(localDisplacement.count == dofCount, "Local displacement size mismatch")
+        precondition(
+            initialStrain.isEmpty || initialStrain.count == strainCount,
+            "Initial strain size mismatch"
+        )
 
         var strain = [Double](repeating: 0, count: strainCount)
         for row in 0..<strainCount {
@@ -76,6 +132,9 @@ public struct ElementKinematics: Sendable {
                 sum += bMatrix[row * dofCount + column] * localDisplacement[column]
             }
             strain[row] = sum
+            if !initialStrain.isEmpty {
+                strain[row] -= initialStrain[row]
+            }
         }
 
         var inPlane = [Double](repeating: 0, count: strainCount)
@@ -171,6 +230,7 @@ public struct ElementKinematics: Sendable {
             strainCount: 6,
             bMatrix: bMatrix,
             constitutive: material.constitutiveMatrix(for: 3),
+            shapeGradients: gradients,
             outOfPlaneMultiplier: 0
         )
     }
@@ -217,6 +277,7 @@ public struct ElementKinematics: Sendable {
         let outOfPlaneMultiplier = material.planeKinematics == .planeStrain
             ? material.lameLambda
             : 0
+        let gradients = (0..<3).map { SIMD3<Double>(b[$0], c[$0], 0) }
 
         return ElementKinematics(
             elementIndex: elementIndex,
@@ -227,6 +288,7 @@ public struct ElementKinematics: Sendable {
             strainCount: 3,
             bMatrix: bMatrix,
             constitutive: material.constitutiveMatrix(for: 2),
+            shapeGradients: gradients,
             outOfPlaneMultiplier: outOfPlaneMultiplier
         )
     }

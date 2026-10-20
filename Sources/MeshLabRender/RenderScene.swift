@@ -52,6 +52,40 @@ public struct RenderScene: Sendable {
         self.revision = revision
     }
 
+    /// Creates a scene from full mesh displacement vectors and a nodal scalar
+    /// field. The scalar field is gathered into surface-vertex order.
+    public init(
+        surface: SurfaceMesh,
+        displacements: [SIMD3<Double>],
+        scalar: [Double],
+        revision: Int = 0
+    ) {
+        precondition(
+            displacements.count == scalar.count,
+            "Displacement and scalar fields must have matching node counts"
+        )
+        precondition(
+            surface.sourceNodes.allSatisfy {
+                $0 >= 0 && $0 < displacements.count
+            },
+            "Displacement and scalar fields must cover every surface node"
+        )
+        self.surface = surface
+        self.displacements = surface.sourceNodes.map { node in
+            let displacement = displacements[node]
+            return SIMD3<Float>(
+                Float(displacement.x),
+                Float(displacement.y),
+                Float(displacement.z)
+            )
+        }
+        self.stress = surface.sourceNodes.map { Float(scalar[$0]) }
+        let minimum = self.stress.min() ?? 0
+        let maximum = self.stress.max() ?? 0
+        self.stressRange = minimum...maximum
+        self.revision = revision
+    }
+
     public init(surface: SurfaceMesh, revision: Int = 0) {
         self.surface = surface
         self.displacements = [SIMD3<Float>](

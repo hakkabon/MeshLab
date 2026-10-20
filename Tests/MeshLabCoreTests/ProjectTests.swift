@@ -80,3 +80,92 @@ import simd
     #expect(decoded.showStress == project.showStress)
     #expect(decoded.deformationScale == project.deformationScale)
 }
+
+@Test func projectRoundTripsP3AnalysisSettings() throws {
+    var project = try MeshLabProject.cantileverExample()
+    project.analysis = .thermalStructural
+    project.modalModeCount = 9
+    project.selectedMode = 3
+    project.thermalStudy.referenceTemperature = 293.15
+    project.thermalStudy.volumetricHeat = 1_000
+    project.material.thermalConductivity = 42
+    project.material.thermalExpansion = 1.1e-5
+
+    let decoded = try MeshLabProjectFile.decode(
+        try MeshLabProjectFile.encode(project)
+    )
+    #expect(decoded == project)
+    #expect(decoded.analysis == .thermalStructural)
+    #expect(decoded.modalModeCount == 9)
+    #expect(decoded.thermalStudy.constraints.count == project.thermalStudy.constraints.count)
+}
+
+@Test func projectReadsVersionOneAndDefaultsP3Fields() throws {
+    let project = try MeshLabProject.cantileverExample()
+    let data = try MeshLabProjectFile.encode(project)
+    var object = try #require(
+        try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    )
+    object["schemaVersion"] = 1
+    object.removeValue(forKey: "analysis")
+    object.removeValue(forKey: "modalModeCount")
+    object.removeValue(forKey: "selectedMode")
+    object.removeValue(forKey: "thermalStudy")
+    if var material = object["material"] as? [String: Any] {
+        material.removeValue(forKey: "thermalConductivity")
+        material.removeValue(forKey: "thermalExpansion")
+        object["material"] = material
+    }
+    let v1Data = try JSONSerialization.data(withJSONObject: object)
+
+    let decoded = try MeshLabProjectFile.decode(v1Data)
+    #expect(decoded.schemaVersion == 1)
+    #expect(decoded.analysis == .staticAnalysis)
+    #expect(decoded.modalModeCount == 6)
+    #expect(decoded.selectedMode == 0)
+    #expect(decoded.thermalStudy.constraints.isEmpty)
+    #expect(decoded.material.thermalConductivity == 0)
+    #expect(decoded.material.thermalExpansion == 0)
+}
+
+@Test func modalAndThermalCSVExportsUseTheirOwnHeaders() throws {
+    let project = try MeshLabProject.cantileverExample()
+    let modal = try ModalAnalysis(options: ModalOptions(modeCount: 2))
+        .solve(project.makeModel())
+    let modalCSV = AnalysisResultExport.modalCSV(project: project, result: modal)
+    #expect(modalCSV.split(separator: "\n").first == "mode,frequencyHz,angularFrequency,maxDisplacement")
+    #expect(modalCSV.split(separator: "\n").count == 3)
+
+    let thermal = try ThermalAnalysis(options: project.makeAnalysisOptions())
+        .solve(project.makeThermalModel())
+    let stress = try ThermalStressAnalysis(referenceTemperature: 20)
+        .solve(project.makeModel(), temperatures: thermal.temperatures)
+    let thermalCSV = AnalysisResultExport.thermalCSV(
+        project: project,
+        temperatures: thermal.temperatures,
+        result: stress.staticResult
+    )
+    #expect(thermalCSV.split(separator: "\n").first
+        == "node,x,y,z,temperature,ux,uy,uz,vonMises")
+    #expect(thermalCSV.split(separator: "\n").count == project.mesh.nodes.count + 1)
+}
+
+@Test func exampleProjectSupportsEveryAnalysisKind() throws {
+    let project = try MeshLabProject.cantileverExample()
+
+    let modal = try ModalAnalysis(options: ModalOptions(
+        modeCount: project.modalModeCount
+    )).solve(project.makeModel())
+    #expect(modal.modes.count == project.modalModeCount)
+    #expect(modal.maximumRelativeResidual < 1e-8)
+
+    let thermal = try ThermalAnalysis(options: project.makeAnalysisOptions())
+        .solve(project.makeThermalModel())
+    let stress = try ThermalStressAnalysis(
+        options: project.makeAnalysisOptions(),
+        referenceTemperature: project.thermalStudy.referenceTemperature
+    ).solve(project.makeModel(), temperatures: thermal.temperatures)
+    #expect(thermal.temperatures.count == project.mesh.nodes.count)
+    #expect(stress.staticResult.maxVonMises.isFinite)
+    #expect(stress.staticResult.maxDisplacement > 0)
+}

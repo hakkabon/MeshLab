@@ -5,12 +5,37 @@ public enum MeshLabProjectError: Error, Equatable, Sendable {
     case unsupportedSchemaVersion(Int)
 }
 
+public enum AnalysisKind: String, Sendable, Hashable, Codable, CaseIterable {
+    case staticAnalysis = "static"
+    case modal
+    case thermalStructural
+}
+
+public struct ThermalStudy: Sendable, Hashable, Codable {
+    public var constraints: [ThermalConstraint]
+    public var referenceTemperature: Double
+    public var nodalHeat: [ThermalLoad]
+    public var volumetricHeat: Double
+
+    public init(
+        constraints: [ThermalConstraint] = [],
+        referenceTemperature: Double = 0,
+        nodalHeat: [ThermalLoad] = [],
+        volumetricHeat: Double = 0
+    ) {
+        self.constraints = constraints
+        self.referenceTemperature = referenceTemperature
+        self.nodalHeat = nodalHeat
+        self.volumetricHeat = volumetricHeat
+    }
+}
+
 /// A portable, editable analysis project.
 ///
 /// The project owns the mesh and analysis definition. Display settings travel
 /// with the document so reopening a project restores the same review state.
 public struct MeshLabProject: Sendable, Equatable, Codable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public var schemaVersion: Int
     public var name: String
@@ -24,6 +49,10 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
     public var directSettings: SparseDirectSettings
     public var showStress: Bool
     public var deformationScale: Float
+    public var analysis: AnalysisKind
+    public var modalModeCount: Int
+    public var selectedMode: Int
+    public var thermalStudy: ThermalStudy
 
     public init(
         name: String = "Untitled",
@@ -36,7 +65,11 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         solverMethod: SparseSolverMethod = .automatic,
         directSettings: SparseDirectSettings = SparseDirectSettings(),
         showStress: Bool = true,
-        deformationScale: Float = 1
+        deformationScale: Float = 1,
+        analysis: AnalysisKind = .staticAnalysis,
+        modalModeCount: Int = 6,
+        selectedMode: Int = 0,
+        thermalStudy: ThermalStudy = ThermalStudy()
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.name = name
@@ -50,6 +83,10 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         self.directSettings = directSettings
         self.showStress = showStress
         self.deformationScale = deformationScale
+        self.analysis = analysis
+        self.modalModeCount = modalModeCount
+        self.selectedMode = selectedMode
+        self.thermalStudy = thermalStudy
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -65,6 +102,10 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         case directSettings
         case showStress
         case deformationScale
+        case analysis
+        case modalModeCount
+        case selectedMode
+        case thermalStudy
     }
 
     public init(from decoder: Decoder) throws {
@@ -85,6 +126,22 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         self.directSettings = try container.decode(SparseDirectSettings.self, forKey: .directSettings)
         self.showStress = try container.decode(Bool.self, forKey: .showStress)
         self.deformationScale = try container.decode(Float.self, forKey: .deformationScale)
+        self.analysis = try container.decodeIfPresent(
+            AnalysisKind.self,
+            forKey: .analysis
+        ) ?? .staticAnalysis
+        self.modalModeCount = try container.decodeIfPresent(
+            Int.self,
+            forKey: .modalModeCount
+        ) ?? 6
+        self.selectedMode = try container.decodeIfPresent(
+            Int.self,
+            forKey: .selectedMode
+        ) ?? 0
+        self.thermalStudy = try container.decodeIfPresent(
+            ThermalStudy.self,
+            forKey: .thermalStudy
+        ) ?? ThermalStudy()
     }
 
     public func makeModel() -> FEMModel {
@@ -95,6 +152,24 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
             loads: loads.map { $0.scaled(by: loadScale) },
             bodyForce: bodyForce * loadScale
         )
+    }
+
+    public func makeThermalModel() -> ThermalModel {
+        ThermalModel(
+            mesh: mesh,
+            material: material,
+            constraints: thermalStudy.constraints,
+            nodalHeat: thermalStudy.nodalHeat,
+            volumetricHeat: thermalStudy.volumetricHeat
+        )
+    }
+
+    public func makeThermalStressModel(temperatures: [Double]) -> FEMModel {
+        var model = makeModel()
+        model.temperatureChange = temperatures.map {
+            $0 - thermalStudy.referenceTemperature
+        }
+        return model
     }
 
     public func makeAnalysisOptions() -> AnalysisOptions {
@@ -112,12 +187,18 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         let material = try ElasticMaterial(
             youngModulus: 200e9,
             poissonRatio: 0.3,
-            density: 7800
+            density: 7800,
+            thermalConductivity: 45,
+            thermalExpansion: 1.2e-5
         )
         let constraints = mesh.nodeIndices { abs($0.z) < 1e-12 }
             .map { DirichletCondition.fixed(node: $0) }
         let loads = mesh.nodeIndices { abs($0.z - 4) < 1e-9 }
             .map { Load.nodal(node: $0, vector: SIMD3<Double>(0, 0, -10_000)) }
+        let thermalConstraints = mesh.nodeIndices { abs($0.z) < 1e-12 }
+            .map { ThermalConstraint(node: $0, temperature: 20) }
+            + mesh.nodeIndices { abs($0.z - 4) < 1e-9 }
+            .map { ThermalConstraint(node: $0, temperature: 120) }
 
         return MeshLabProject(
             name: "Cantilever",
@@ -126,7 +207,13 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
             constraints: constraints,
             loads: loads,
             solverMethod: .automatic,
-            deformationScale: 1_000
+            deformationScale: 1_000,
+            analysis: .staticAnalysis,
+            modalModeCount: 6,
+            thermalStudy: ThermalStudy(
+                constraints: thermalConstraints,
+                referenceTemperature: 20
+            )
         )
     }
 }
@@ -169,6 +256,51 @@ public enum AnalysisResultExport {
                 number(position.x),
                 number(position.y),
                 number(position.z),
+                number(displacement.x),
+                number(displacement.y),
+                number(displacement.z),
+                number(result.nodalVonMises[node]),
+            ].joined(separator: ","))
+        }
+        return rows.joined(separator: "\n") + "\n"
+    }
+
+    /// Exports the requested modal frequencies and normalized mode peak.
+    public static func modalCSV(project: MeshLabProject, result: ModalResult) -> String {
+        var rows = ["mode,frequencyHz,angularFrequency,maxDisplacement"]
+        for mode in result.modes {
+            let peak = mode.displacements.reduce(0.0) {
+                max($0, simd_length($1))
+            }
+            rows.append([
+                String(mode.index + 1),
+                number(mode.frequencyHz),
+                number(mode.angularFrequency),
+                number(peak),
+            ].joined(separator: ","))
+        }
+        return rows.joined(separator: "\n") + "\n"
+    }
+
+    /// Exports temperatures together with the coupled static stress result.
+    public static func thermalCSV(
+        project: MeshLabProject,
+        temperatures: [Double],
+        result: StaticResult
+    ) -> String {
+        var rows = [
+            "node,x,y,z,temperature,ux,uy,uz,vonMises",
+        ]
+        rows.reserveCapacity(project.mesh.nodes.count + 1)
+        for node in project.mesh.nodes.indices {
+            let position = project.mesh.nodes[node]
+            let displacement = result.displacements[node]
+            rows.append([
+                String(node),
+                number(position.x),
+                number(position.y),
+                number(position.z),
+                number(temperatures[node]),
                 number(displacement.x),
                 number(displacement.y),
                 number(displacement.z),
