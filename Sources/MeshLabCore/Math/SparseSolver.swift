@@ -28,18 +28,64 @@ public struct SparseIterativeSettings: Sendable, Hashable {
     }
 }
 
+/// Ordering used by reusable NumericCore factorizations.
+public enum SparseOrderingKind: Sendable, Hashable {
+    case natural
+    case minimumDegree
+}
+
+/// Options for NumericCore's reusable direct factorizations.
+public struct SparseDirectSettings: Sendable, Hashable {
+    public var ordering: SparseOrderingKind
+    public var pivotTolerance: Double
+    public var dropTolerance: Double
+    public var refinementSteps: Int
+    public var refinementTolerance: Double
+
+    public init(
+        ordering: SparseOrderingKind = .minimumDegree,
+        pivotTolerance: Double = 1e-12,
+        dropTolerance: Double = 0,
+        refinementSteps: Int = 3,
+        refinementTolerance: Double = 1e-12
+    ) {
+        self.ordering = ordering
+        self.pivotTolerance = pivotTolerance
+        self.dropTolerance = dropTolerance
+        self.refinementSteps = refinementSteps
+        self.refinementTolerance = refinementTolerance
+    }
+}
+
+/// Inertia reported by NumericCore's symmetric-indefinite LDLᵀ factorization.
+public struct SparseInertiaReport: Sendable, Hashable {
+    public let positive: Int
+    public let negative: Int
+    public let zero: Int
+
+    public init(positive: Int, negative: Int, zero: Int) {
+        self.positive = positive
+        self.negative = negative
+        self.zero = zero
+    }
+}
+
 /// Linear solver strategies.
 ///
-/// `automatic` uses Accelerate's hardware sparse Cholesky for symmetric
-/// systems and NumericCore's Rust-backed sparse LU for everything else.
-/// NumericCore's iterative methods and preconditioners are available for
-/// very large systems where a direct factorization is undesirable.
+/// `automatic` uses Accelerate's hardware sparse LDLᵀ for symmetric systems
+/// and NumericCore's reusable sparse LU for everything else. Explicit
+/// NumericCore direct methods expose symbolic reuse and refinement, while its
+/// iterative methods are available for very large systems where a direct
+/// factorization is undesirable.
 public enum SparseSolverMethod: Sendable, Hashable {
     case automatic
     case accelerateCholesky
     case accelerateLDLT
     case numericCoreCholesky
+    /// Reusable pivoted sparse LU from NumericCore.
     case numericCoreLU
+    /// Reusable symmetric-indefinite LDLᵀ from NumericCore.
+    case numericCoreLDLT
     case conjugateGradient(SparseIterativeSettings)
     case biCGSTAB(SparseIterativeSettings)
     case gmres(restart: Int, settings: SparseIterativeSettings)
@@ -62,6 +108,12 @@ public struct SparseSolveReport: Sendable {
     public let relativeResidual: Double?
     public let factorNonZeroCount: Int?
     public let converged: Bool
+    /// Backward error after iterative refinement, when reported by NumericCore.
+    public let backwardError: Double?
+    /// Number of iterative-refinement steps applied by NumericCore.
+    public let refinementSteps: Int?
+    /// Inertia for symmetric-indefinite LDLᵀ, when available.
+    public let inertia: SparseInertiaReport?
 }
 
 /// A reusable linear solver for a fixed sparsity pattern.
@@ -72,9 +124,14 @@ public struct SparseSolveReport: Sendable {
 public final class SparseSolver {
     public let size: Int
     public let method: SparseSolverMethod
+    public let directSettings: SparseDirectSettings
     private let backend: any SparseSolverBackend
 
-    public init(matrix: SparseMatrix, method: SparseSolverMethod = .automatic) throws {
+    public init(
+        matrix: SparseMatrix,
+        method: SparseSolverMethod = .automatic,
+        directSettings: SparseDirectSettings = SparseDirectSettings()
+    ) throws {
         guard matrix.rowCount > 0, matrix.columnCount > 0 else {
             throw SparseSolverError.emptyMatrix
         }
@@ -88,13 +145,18 @@ public final class SparseSolver {
         let resolved = try Self.resolve(method, matrix: matrix)
         self.size = matrix.rowCount
         self.method = resolved
+        self.directSettings = directSettings
 
         switch resolved {
         case .accelerateCholesky, .accelerateLDLT:
             backend = try AccelerateSparseBackend(matrix: matrix, method: resolved)
-        case .numericCoreCholesky, .numericCoreLU,
+        case .numericCoreCholesky, .numericCoreLU, .numericCoreLDLT,
              .conjugateGradient, .biCGSTAB, .gmres:
-            backend = try NumericCoreSparseBackend(matrix: matrix, method: resolved)
+            backend = try NumericCoreSparseBackend(
+                matrix: matrix,
+                method: resolved,
+                settings: directSettings
+            )
         case .automatic:
             preconditionFailure("automatic is resolved before backend creation")
         }
@@ -136,6 +198,11 @@ public final class SparseSolver {
             return method
         case .numericCoreCholesky:
             // NumericCore validates symmetry and positive definiteness itself.
+            return method
+        case .numericCoreLDLT:
+            guard matrix.isSymmetric else {
+                throw SparseSolverError.requiresSymmetricMatrix
+            }
             return method
         case .numericCoreLU, .conjugateGradient, .biCGSTAB, .gmres:
             return method
@@ -199,7 +266,10 @@ private final class AccelerateSparseBackend: SparseSolverBackend {
             iterations: nil,
             relativeResidual: nil,
             factorNonZeroCount: nil,
-            converged: true
+            converged: true,
+            backwardError: nil,
+            refinementSteps: nil,
+            inertia: nil
         )
     }
 
@@ -291,11 +361,45 @@ private final class AccelerateSparseBackend: SparseSolverBackend {
 
 private final class NumericCoreSparseBackend: SparseSolverBackend {
     private let method: SparseSolverMethod
+    private let settings: SparseDirectSettings
     private var matrix: NumericCoreSparse.SparseMatrix<Double>
+    private var luFactorization: NumericCoreSparse.SparseLUFactorization?
+    private var ldltFactorization: NumericCoreSparse.SparseLDLTFactorization?
 
-    init(matrix source: SparseMatrix, method: SparseSolverMethod) throws {
+    init(
+        matrix source: SparseMatrix,
+        method: SparseSolverMethod,
+        settings: SparseDirectSettings
+    ) throws {
         self.method = method
-        self.matrix = try NumericCoreSparseBackend.makeMatrix(source)
+        self.settings = settings
+        let ncMatrix = try Self.makeMatrix(source)
+        self.matrix = ncMatrix
+
+        do {
+            switch method {
+            case .numericCoreLU:
+                let ordering = Self.ordering(settings.ordering)
+                let options = Self.numericOptions(settings)
+                self.luFactorization = try NumericCoreSparse.SparseLUFactorization(
+                    matrix: ncMatrix,
+                    ordering: ordering,
+                    options: options
+                )
+            case .numericCoreLDLT:
+                let ordering = Self.ordering(settings.ordering)
+                let options = Self.numericOptions(settings)
+                self.ldltFactorization = try NumericCoreSparse.SparseLDLTFactorization(
+                    matrix: ncMatrix,
+                    ordering: ordering,
+                    options: options
+                )
+            default:
+                break
+            }
+        } catch {
+            throw Self.map(error)
+        }
     }
 
     func solve(_ rhs: [Double]) throws -> SparseSolveReport {
@@ -309,39 +413,65 @@ private final class NumericCoreSparseBackend: SparseSolverBackend {
                     iterations: nil,
                     relativeResidual: result.relativeResidual,
                     factorNonZeroCount: result.factorNonZeroCount,
-                    converged: true
+                    converged: true,
+                    backwardError: nil,
+                    refinementSteps: 0,
+                    inertia: nil
                 )
 
             case .numericCoreLU:
-                let result = try SparseLinearSolver.solveLU(matrix: matrix, rhs: rhs)
+                guard let factorization = luFactorization else {
+                    throw SparseSolverError.numericCoreFailure("LU factorization is unavailable")
+                }
+                let result = try factorization.solveRefined(rhs)
                 return SparseSolveReport(
                     solution: result.solution,
                     method: method,
                     iterations: nil,
                     relativeResidual: result.relativeResidual,
-                    factorNonZeroCount: result.factorNonZeroCount,
-                    converged: true
+                    factorNonZeroCount: result.diagnostics.factorNonZeroCount,
+                    converged: true,
+                    backwardError: result.backwardError,
+                    refinementSteps: result.refinementSteps,
+                    inertia: nil
                 )
 
-            case .conjugateGradient(let settings):
+            case .numericCoreLDLT:
+                guard let factorization = ldltFactorization else {
+                    throw SparseSolverError.numericCoreFailure("LDLT factorization is unavailable")
+                }
+                let result = try factorization.solveRefined(rhs)
+                return SparseSolveReport(
+                    solution: result.solution,
+                    method: method,
+                    iterations: nil,
+                    relativeResidual: result.relativeResidual,
+                    factorNonZeroCount: result.diagnostics.factorNonZeroCount,
+                    converged: true,
+                    backwardError: result.backwardError,
+                    refinementSteps: result.refinementSteps,
+                    inertia: Self.inertia(factorization.inertia)
+                )
+
+            case .conjugateGradient(let iterativeSettings):
                 return try solveIteratively(
                     rhs: rhs,
                     method: .conjugateGradient,
-                    settings: settings
+                    settings: iterativeSettings
                 )
 
-            case .biCGSTAB(let settings):
+            case .biCGSTAB(let iterativeSettings):
                 return try solveIteratively(
                     rhs: rhs,
                     method: .biCGSTAB,
-                    settings: settings
+                    settings: iterativeSettings
                 )
 
-            case .gmres(let restart, let settings):
+            case .gmres(let restart, let iterativeSettings):
                 return try solveIteratively(
                     rhs: rhs,
                     method: .gmres(restart: restart),
-                    settings: settings
+                    settings: iterativeSettings
                 )
 
             default:
@@ -350,12 +480,33 @@ private final class NumericCoreSparseBackend: SparseSolverBackend {
         } catch let error as SparseSolverError {
             throw error
         } catch {
-            throw SparseSolverError.numericCoreFailure(String(describing: error))
+            throw Self.map(error)
         }
     }
 
     func refactor(with source: SparseMatrix) throws {
-        matrix = try Self.makeMatrix(source)
+        do {
+            let newMatrix = try Self.makeMatrix(source)
+            switch method {
+            case .numericCoreLU:
+                guard let factorization = luFactorization else {
+                    throw SparseSolverError.numericCoreFailure("LU factorization is unavailable")
+                }
+                try factorization.refactor(with: newMatrix)
+            case .numericCoreLDLT:
+                guard let factorization = ldltFactorization else {
+                    throw SparseSolverError.numericCoreFailure("LDLT factorization is unavailable")
+                }
+                try factorization.refactor(with: newMatrix)
+            default:
+                break
+            }
+            matrix = newMatrix
+        } catch let error as SparseSolverError {
+            throw error
+        } catch {
+            throw Self.map(error)
+        }
     }
 
     private func solveIteratively(
@@ -387,7 +538,10 @@ private final class NumericCoreSparseBackend: SparseSolverBackend {
             iterations: result.iterations,
             relativeResidual: result.relativeResidual,
             factorNonZeroCount: nil,
-            converged: result.converged
+            converged: result.converged,
+            backwardError: nil,
+            refinementSteps: nil,
+            inertia: nil
         )
     }
 
@@ -404,6 +558,45 @@ private final class NumericCoreSparseBackend: SparseSolverBackend {
         case .incompleteCholesky:
             return .incompleteCholesky
         }
+    }
+
+    private static func ordering(
+        _ ordering: SparseOrderingKind
+    ) -> NumericCoreSparse.SparseOrdering {
+        switch ordering {
+        case .natural:
+            return .natural
+        case .minimumDegree:
+            return .minimumDegree
+        }
+    }
+
+    private static func numericOptions(
+        _ settings: SparseDirectSettings
+    ) -> NumericCoreSparse.SparseNumericOptions {
+        NumericCoreSparse.SparseNumericOptions(
+            pivotTolerance: settings.pivotTolerance,
+            dropTolerance: settings.dropTolerance,
+            refinementSteps: settings.refinementSteps,
+            refinementTolerance: settings.refinementTolerance
+        )
+    }
+
+    private static func inertia(
+        _ inertia: NumericCoreSparse.SparseInertia
+    ) -> SparseInertiaReport {
+        SparseInertiaReport(
+            positive: inertia.positive,
+            negative: inertia.negative,
+            zero: inertia.zero
+        )
+    }
+
+    private static func map(_ error: Error) -> SparseSolverError {
+        if let error = error as? SparseSolverError {
+            return error
+        }
+        return .numericCoreFailure(String(describing: error))
     }
 
     /// Expands the FEM-oriented lower-triangle CSR into canonical full CSR
@@ -482,7 +675,7 @@ private final class NumericCoreSparseBackend: SparseSolverBackend {
                 values: values
             )
         } catch {
-            throw SparseSolverError.numericCoreFailure(String(describing: error))
+            throw Self.map(error)
         }
     }
 }

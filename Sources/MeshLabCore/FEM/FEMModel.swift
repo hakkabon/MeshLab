@@ -69,13 +69,17 @@ public struct FEMModel: Sendable {
 
 public struct AnalysisOptions: Sendable {
     public var solverMethod: SparseSolverMethod
+    /// Ordering and refinement options used by NumericCore direct solvers.
+    public var directSettings: SparseDirectSettings
     public var computeReactions: Bool
 
     public init(
         solverMethod: SparseSolverMethod = .automatic,
+        directSettings: SparseDirectSettings = SparseDirectSettings(),
         computeReactions: Bool = true
     ) {
         self.solverMethod = solverMethod
+        self.directSettings = directSettings
         self.computeReactions = computeReactions
     }
 }
@@ -198,7 +202,8 @@ public struct StaticAnalysis: Sendable {
         do {
             solver = try SparseSolver(
                 matrix: reduction.matrix,
-                method: options.solverMethod
+                method: options.solverMethod,
+                directSettings: options.directSettings
             )
         } catch let error as SparseSolverError {
             throw FEMError.solver(error)

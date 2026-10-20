@@ -19,9 +19,21 @@ P0 (Stabilize) is complete:
 - a benchmark executable records assembly, solve, and scene-building baselines;
 - the repository layout, build commands, and current limitations are documented.
 
-The core has 21 tests covering vector/dense/sparse math, mesh topology and
-surface extraction, linear-static FEM equilibrium, solver backends, camera math,
-render-scene mapping, and Metal pipeline creation.
+P1 (Unify numerics) is complete:
+
+- `SparseSolver` is a facade over reusable `NumericCoreSparse` LU and LDLT
+  factorizations, with symbolic reuse through `refactor(with:)`;
+- direct settings expose ordering, pivot/drop tolerances, and refinement;
+- solve reports expose backward error, refinement steps, factor nonzeros, and
+  LDLT inertia;
+- 3D patch and cantilever cases compare Accelerate and NumericCore backends;
+- ownership boundaries stay explicit: FEM assembly owns the symmetric lower-CSR
+  format, and the facade expands it for NumericCore.
+
+The core has 26 tests covering vector/dense/sparse math, mesh topology and
+surface extraction, linear-static FEM equilibrium, solver backends and
+factorization reuse, camera math, render-scene mapping, and Metal pipeline
+creation.
 
 ## Architecture
 
@@ -122,8 +134,10 @@ the environment it was captured on.
 - Reactions, strain energy, element stresses, and nodal von Mises averaging.
 - Structured box and rectangle mesh generators.
 - Boundary surface extraction with outward face normals and source-node mapping.
-- Solver selection: Accelerate Cholesky/LDLT, NumericCore Cholesky/LU, and
-  CG/BiCGSTAB/GMRES with diagnostics.
+- Solver selection: Accelerate Cholesky/LDLT, NumericCore Cholesky/LU/LDLT,
+  reusable NumericCore factorizations, and CG/BiCGSTAB/GMRES with diagnostics.
+- Solver diagnostics: backward error, refinement steps, factor nonzeros, and
+  LDLT inertia; same-pattern numeric refactorization.
 - Connectivity, unsupported-DOF, and free-DOF residual checks.
 
 ### Rendering
@@ -175,8 +189,8 @@ Scripts/
 ## Roadmap
 
 - **P0 — Stabilize:** ownership ADR, CI, benchmark baseline, repository hygiene.
-- **P1 — Unify numerics:** solver facade over NumericCoreSparse, 3D validation
-  suite, coarse-grained FFI usage.
+- **P1 — Unify numerics (complete):** solver facade over NumericCoreSparse,
+  3D validation suite, coarse-grained FFI usage.
 - **P2 — Product slice:** SwiftUI app, import/export, asynchronous solve,
   picking, colorbar.
 - **P3 — Physics breadth:** 3D modal/transient, thermal-structural, nonlinear
@@ -193,6 +207,7 @@ Scripts/
 - Do not import `NCBindings` or generated UniFFI symbols outside the Swift
   package boundary.
 - Add or update tests for behavior changes.
-- Run `swift test`, `swift build -c release`, and the benchmark harness before
-  opening a change that affects analysis or rendering performance.
+- Run `swift test`, `swift build -c release`, `./Scripts/check-architecture.sh`,
+  and the benchmark harness before opening a change that affects analysis or
+  rendering performance.
 - Record architectural changes as ADRs.

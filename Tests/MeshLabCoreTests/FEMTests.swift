@@ -101,6 +101,19 @@ private func unitTetrahedron() throws -> Mesh {
     #expect(abs(numericCore.maxDisplacement - accelerate.maxDisplacement)
         / accelerate.maxDisplacement < 1e-6)
 
+    let numericCoreLU = try StaticAnalysis(
+        options: AnalysisOptions(solverMethod: .numericCoreLU)
+    ).solve(model)
+    #expect(abs(numericCoreLU.maxDisplacement - accelerate.maxDisplacement)
+        / accelerate.maxDisplacement < 1e-6)
+
+    let numericCoreLDLT = try StaticAnalysis(
+        options: AnalysisOptions(solverMethod: .numericCoreLDLT)
+    ).solve(model)
+    #expect(abs(numericCoreLDLT.maxDisplacement - accelerate.maxDisplacement)
+        / accelerate.maxDisplacement < 1e-6)
+    #expect(numericCoreLDLT.solveReport.inertia?.positive == mesh.dofCount - constraints.count * 3)
+
     let iterative = try StaticAnalysis(
         options: AnalysisOptions(
             solverMethod: .conjugateGradient(.init(
@@ -190,5 +203,65 @@ private func unitTetrahedron() throws -> Mesh {
     )
     #expect(throws: FEMError.self) {
         _ = try StaticAnalysis().solve(model)
+    }
+}
+
+@Test func threeDimensionalPatchTestReproducesLinearField() throws {
+    let mesh = try MeshGenerators.structuredBox(
+        size: SIMD3<Double>(1, 1, 1),
+        divisions: SIMD3<Int>(2, 2, 2)
+    )
+    let material = try ElasticMaterial(youngModulus: 210e9, poissonRatio: 0.3)
+    let strain = SIMD3<Double>(0.01, -0.003, 0.002)
+
+    let boundary = mesh.nodeIndices { point in
+        point.x == 0 || point.x == 1
+            || point.y == 0 || point.y == 1
+            || point.z == 0 || point.z == 1
+    }
+    let constraints = boundary.flatMap { node in
+        (0..<3).map { axis in
+            DirichletCondition(
+                node: node,
+                axis: axis,
+                value: strain[axis] * mesh.nodes[node][axis]
+            )
+        }
+    }
+    let model = FEMModel(
+        mesh: mesh,
+        material: material,
+        constraints: constraints
+    )
+    let result = try StaticAnalysis(
+        options: AnalysisOptions(solverMethod: .numericCoreLDLT)
+    ).solve(model)
+
+    let interior = mesh.nodeIndices { point in
+        abs(point.x - 0.5) < 1e-12
+            && abs(point.y - 0.5) < 1e-12
+            && abs(point.z - 0.5) < 1e-12
+    }
+    #expect(interior.count == 1)
+    let node = try #require(interior.first)
+    for axis in 0..<3 {
+        #expect(abs(result.displacements[node][axis] - strain[axis] * 0.5) < 1e-12)
+    }
+
+    let lambda = material.lameLambda
+    let mu = material.shearModulus
+    let expected = [
+        (lambda + 2 * mu) * strain.x + lambda * (strain.y + strain.z),
+        lambda * strain.x + (lambda + 2 * mu) * strain.y + lambda * strain.z,
+        lambda * (strain.x + strain.y) + (lambda + 2 * mu) * strain.z,
+        0.0,
+        0.0,
+        0.0,
+    ]
+    let scale = expected.map(abs).max() ?? 1
+    for stress in result.elementStresses {
+        for index in 0..<6 {
+            #expect(abs(stress.components[index] - expected[index]) < scale * 1e-9)
+        }
     }
 }
