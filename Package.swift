@@ -1,24 +1,56 @@
 // swift-tools-version: 6.1
-// The swift-tools-version declares the minimum version of Swift required to build this package.
-
 import PackageDescription
 
 let package = Package(
     name: "MeshLab",
+    platforms: [
+        .macOS(.v13),
+        .iOS(.v16),
+    ],
     products: [
-        // Products define the executables and libraries a package produces, making them visible to other packages.
-        .library(
-            name: "MeshLab",
-            targets: ["MeshLab"]),
+        .library(name: "MeshLab", targets: ["MeshLab"]),
+        .library(name: "MeshLabCore", targets: ["MeshLabCore"]),
+        .library(name: "MeshLabRender", targets: ["MeshLabRender"]),
+    ],
+    dependencies: [
+        .package(
+            url: "https://github.com/hakkabon/Swift-NumericCore.git",
+            .upToNextMajor(from: "1.0.0")
+        ),
     ],
     targets: [
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
         .target(
-            name: "MeshLab"),
+            name: "MeshLabCore",
+            dependencies: [
+                .product(name: "NumericCore", package: "Swift-NumericCore"),
+                .product(name: "NumericCoreSparse", package: "Swift-NumericCore"),
+            ],
+            linkerSettings: [
+                .linkedFramework("Accelerate"),
+            ]
+        ),
+        .target(
+            name: "MeshLabRender",
+            dependencies: ["MeshLabCore"],
+            resources: [
+                .copy("Shaders.metal"),
+            ],
+            linkerSettings: [
+                .linkedFramework("Metal"),
+                .linkedFramework("MetalKit"),
+            ]
+        ),
+        .target(
+            name: "MeshLab",
+            dependencies: ["MeshLabCore", "MeshLabRender"]
+        ),
         .testTarget(
-            name: "MeshLabTests",
-            dependencies: ["MeshLab"]
+            name: "MeshLabCoreTests",
+            dependencies: ["MeshLabCore"]
+        ),
+        .testTarget(
+            name: "MeshLabRenderTests",
+            dependencies: ["MeshLabCore", "MeshLabRender"]
         ),
     ]
 )
