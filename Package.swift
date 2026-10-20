@@ -11,8 +11,12 @@ let package = Package(
         .library(name: "MeshLab", targets: ["MeshLab"]),
         .library(name: "MeshLabCore", targets: ["MeshLabCore"]),
         .library(name: "MeshLabRender", targets: ["MeshLabRender"]),
+        .executable(name: "MeshLabBenchmarks", targets: ["MeshLabBenchmarks"]),
     ],
     dependencies: [
+        // NumericCore is the numerical substrate. See
+        // docs/decisions/0002-dependency-and-release-policy.md. Always consume
+        // a released 1.x tag; never a branch or local path.
         .package(
             url: "https://github.com/hakkabon/Swift-NumericCore.git",
             .upToNextMajor(from: "1.0.0")
@@ -43,6 +47,11 @@ let package = Package(
         .target(
             name: "MeshLab",
             dependencies: ["MeshLabCore", "MeshLabRender"]
+        ),
+        .executableTarget(
+            name: "MeshLabBenchmarks",
+            dependencies: ["MeshLabCore", "MeshLabRender"],
+            path: "Benchmarks/MeshLabBenchmarks"
         ),
         .testTarget(
             name: "MeshLabCoreTests",

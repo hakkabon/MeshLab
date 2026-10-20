@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:MeshLab}",
+            "name": "Debug MeshLabBenchmarks",
+            "target": "MeshLabBenchmarks",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug MeshLabBenchmarks"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:MeshLab}",
+            "name": "Release MeshLabBenchmarks",
+            "target": "MeshLabBenchmarks",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release MeshLabBenchmarks"
+        }
+    ]
+}

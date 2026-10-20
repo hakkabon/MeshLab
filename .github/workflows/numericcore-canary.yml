@@ -1,0 +1,35 @@
+name: NumericCore canary
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  latest-numericcore:
+    name: Test against latest NumericCore 1.x
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Update dependencies
+        run: swift package update
+
+      - name: Report resolved NumericCore version
+        run: |
+          swift package show-dependencies --format json
+
+      - name: Test
+        run: swift test
+
+      - name: Build (release)
+        run: swift build -c release
