@@ -19,6 +19,26 @@
             "target": "MeshLabBenchmarks",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release MeshLabBenchmarks"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:MeshLab}",
+            "name": "Debug MeshLabApp",
+            "target": "MeshLabApp",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug MeshLabApp"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:MeshLab}",
+            "name": "Release MeshLabApp",
+            "target": "MeshLabApp",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release MeshLabApp"
         }
     ]
 }

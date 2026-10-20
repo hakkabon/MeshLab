@@ -7,6 +7,9 @@ import MeshLabCore
 public final class FEMViewportCoordinator: NSObject, MTKViewDelegate {
     public private(set) var renderer: FEMRenderer?
     public private(set) weak var view: MTKView?
+    public var onPick: ((SurfacePick?) -> Void)?
+    private var scene: RenderScene?
+    private var options = RenderOptions()
     private var hasAppliedInitialCamera = false
 
     public func attach(to view: MTKView) {
@@ -27,6 +30,8 @@ public final class FEMViewportCoordinator: NSObject, MTKViewDelegate {
         options: RenderOptions,
         initialCamera: OrbitCamera?
     ) {
+        self.scene = scene
+        self.options = options
         if let initialCamera, !hasAppliedInitialCamera {
             renderer?.setCamera(initialCamera)
             hasAppliedInitialCamera = true
@@ -41,6 +46,23 @@ public final class FEMViewportCoordinator: NSObject, MTKViewDelegate {
         } else {
             renderer.clear()
         }
+    }
+
+    public func pick(at point: CGPoint, originTopLeft: Bool) {
+        guard let view, let renderer, let scene else {
+            onPick?(nil)
+            return
+        }
+        let pick = SurfacePicker.pick(
+            surface: scene.surface,
+            displacements: scene.displacements,
+            deformationScale: options.deformationScale,
+            point: point,
+            viewSize: view.bounds.size,
+            camera: renderer.camera,
+            originTopLeft: originTopLeft
+        )
+        onPick?(pick)
     }
 
     public func orbit(deltaX: CGFloat, deltaY: CGFloat) {

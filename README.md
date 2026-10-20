@@ -4,10 +4,10 @@ MeshLab is an Apple-native finite-element analysis foundation and Metal viewer
 in progress. It combines Swift geometry and 3D element assembly with the
 NumericCore numerical stack and a real-time Metal renderer.
 
-The project is currently a library foundation, not a finished application. It
-supports linear-elastic static analysis of tetrahedral and triangular meshes,
-stress recovery, and interactive deformation/stress visualization in SwiftUI on
-macOS and iOS.
+It provides linear-elastic static analysis of tetrahedral and triangular
+meshes, stress recovery, an interactive Metal viewport, and a SwiftUI product
+slice for opening, solving, inspecting, and exporting projects on macOS and
+iOS.
 
 ## Status
 
@@ -30,16 +30,27 @@ P1 (Unify numerics) is complete:
 - ownership boundaries stay explicit: FEM assembly owns the symmetric lower-CSR
   format, and the facade expands it for NumericCore.
 
-The core has 26 tests covering vector/dense/sparse math, mesh topology and
+P2 (Product slice) is complete:
+
+- `MeshLabApp` provides a SwiftUI workbench with material, load, solver, and
+  display controls;
+- versioned JSON projects round-trip through import/export, and nodal results
+  export as CSV;
+- solves run asynchronously and report progress, errors, and timings;
+- clicking the deformed surface selects a source node for inspection;
+- the viewport includes a stress colorbar matching the Metal heatmap.
+
+The package has 33 tests covering vector/dense/sparse math, mesh topology and
 surface extraction, linear-static FEM equilibrium, solver backends and
-factorization reuse, camera math, render-scene mapping, and Metal pipeline
-creation.
+factorization reuse, project files and CSV export, camera math, render-scene
+mapping, stress palettes, surface picking, and Metal pipeline creation.
 
 ## Architecture
 
 ```
                   +----------------------+
-                  |   SwiftUI / App      |  (not yet implemented)
+                  | MeshLabApp (SwiftUI) |  project workflow, picking,
+                  |                      |  colorbar, async solve
                   +----------+-----------+
                              |
                   +----------v-----------+
@@ -67,6 +78,7 @@ creation.
 | `MeshLabCore` | Mesh types, structured generators, material models, element kinematics, global assembly, Dirichlet/load handling, static analysis, result fields, solver facade. |
 | `MeshLabRender` | Surface extraction consumption, `RenderScene`, orbit camera, Metal pipeline, shared result buffers, `MTKView`/SwiftUI bridges. |
 | `MeshLab` | Umbrella re-export of Core and Render. |
+| `MeshLabApp` | SwiftUI workbench: project import/export, asynchronous solve, inspection, picking, and colorbar. |
 | `MeshLabBenchmarks` | Release-mode timing harness for mesh generation, assembly/solve, and render-scene construction. |
 
 ### Ownership boundary
@@ -94,6 +106,7 @@ and its consequences.
 swift build
 swift test
 swift build -c release
+swift run MeshLabApp
 ```
 
 The package resolves `Swift-NumericCore` 1.x from a released tag and commits
@@ -140,6 +153,15 @@ the environment it was captured on.
   LDLT inertia; same-pattern numeric refactorization.
 - Connectivity, unsupported-DOF, and free-DOF residual checks.
 
+### Workbench
+
+- SwiftUI app with a built-in cantilever example and editable material/loads.
+- Solver picker for Accelerate and NumericCore direct/iterative methods.
+- Versioned JSON project import/export; nodal CSV result export.
+- Asynchronous solve with progress, cancellation of stale results, and errors.
+- Surface picking resolves the deformed hit point to a source node.
+- Stress colorbar mirrors the Metal five-stop palette.
+
 ### Rendering
 
 - Metal renderer with deformed geometry and stress heatmap.
@@ -157,9 +179,12 @@ the environment it was captured on.
   beams.
 - Structured meshes only; no CAD/mesh import, unstructured meshing, quality
   metrics, or adaptivity.
-- No document/app target, result export, report generation, or persistence.
-- Rendering lacks colorbar, picking, clipping, vector glyphs, and time
-  animation.
+- No document-based autosave, project migrations, or report generation yet.
+- Import is limited to MeshLab project JSON; OBJ/STL/CAD import is not
+  implemented.
+- Rendering lacks clipping, vector glyphs, and time animation.
+- Picking is CPU ray casting and will need a spatial index or GPU picking for
+  very large surfaces.
 - Shaders are compiled at runtime; there is no precompiled `.metallib` yet.
 - iOS is built from shared sources but is not yet covered by a dedicated CI job.
 - The benchmark baseline was captured on an Intel Mac with a discrete GPU, so
@@ -169,9 +194,10 @@ the environment it was captured on.
 
 ```
 Sources/
-  MeshLabCore/        math, mesh, FEM, generators
-  MeshLabRender/      camera, renderer, SwiftUI bridges, MSL
+  MeshLabCore/        math, mesh, FEM, generators, project format
+  MeshLabRender/      camera, renderer, SwiftUI bridges, MSL, picking, colorbar
   MeshLab/            umbrella module
+  MeshLabApp/         SwiftUI workbench executable
 Tests/
   MeshLabCoreTests/   math, mesh, FEM tests
   MeshLabRenderTests/ camera, scene, Metal pipeline tests
@@ -191,8 +217,8 @@ Scripts/
 - **P0 — Stabilize:** ownership ADR, CI, benchmark baseline, repository hygiene.
 - **P1 — Unify numerics (complete):** solver facade over NumericCoreSparse,
   3D validation suite, coarse-grained FFI usage.
-- **P2 — Product slice:** SwiftUI app, import/export, asynchronous solve,
-  picking, colorbar.
+- **P2 — Product slice (complete):** SwiftUI app, import/export, asynchronous
+  solve, picking, colorbar.
 - **P3 — Physics breadth:** 3D modal/transient, thermal-structural, nonlinear
   statics, higher-order elements.
 - **P4 — Design loop:** parametric studies, adjoint sensitivities, shape and

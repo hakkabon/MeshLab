@@ -1,7 +1,7 @@
 import Foundation
 import simd
 
-public struct DirichletCondition: Sendable, Hashable {
+public struct DirichletCondition: Sendable, Hashable, Codable {
     /// Node index in the mesh.
     public let node: Int
     /// Component axis (`0...dimension-1`), or `nil` to constrain all axes.
@@ -23,7 +23,7 @@ public struct DirichletCondition: Sendable, Hashable {
     }
 }
 
-public enum Load: Sendable, Hashable {
+public enum Load: Sendable, Hashable, Codable {
     /// Point load at a node.
     case nodal(node: Int, vector: SIMD3<Double>)
     /// Uniform traction on a triangular face (`nodes` must contain three

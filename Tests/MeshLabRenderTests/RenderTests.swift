@@ -1,3 +1,4 @@
+import CoreGraphics
 import Testing
 import simd
 import MeshLabCore
@@ -146,3 +147,57 @@ private func cantileverModel() throws -> (mesh: Mesh, result: StaticResult) {
     #expect(!renderer.hasGeometry)
 }
 #endif
+
+@Test func stressPaletteInterpolatesShaderStops() {
+    #expect(StressPalette.component(at: 0) == StressPalette.components.first)
+    #expect(StressPalette.component(at: 1) == StressPalette.components.last)
+    #expect(StressPalette.component(at: -1) == StressPalette.components.first)
+    #expect(StressPalette.component(at: 2) == StressPalette.components.last)
+
+    let midpoint = StressPalette.component(at: 0.125)
+    #expect(midpoint.x > StressPalette.components[0].x)
+    #expect(midpoint.x < StressPalette.components[1].x)
+}
+
+@Test func surfacePickerSelectsVisibleNodeAndRejectsBackground() throws {
+    let (mesh, result) = try cantileverModel()
+    let surface = try mesh.makeSurfaceMesh()
+    let scene = RenderScene(surface: surface, result: result)
+    var camera = OrbitCamera()
+    let bounds = mesh.bounds
+    camera.frame(
+        minimum: SIMD3<Float>(
+            Float(bounds.minimum.x),
+            Float(bounds.minimum.y),
+            Float(bounds.minimum.z)
+        ),
+        maximum: SIMD3<Float>(
+            Float(bounds.maximum.x),
+            Float(bounds.maximum.y),
+            Float(bounds.maximum.z)
+        )
+    )
+
+    let size = CGSize(width: 512, height: 512)
+    let center = SurfacePicker.pick(
+        surface: surface,
+        displacements: scene.displacements,
+        deformationScale: scene.stressRange.upperBound > 0 ? 250 : 1,
+        point: CGPoint(x: 256, y: 256),
+        viewSize: size,
+        camera: camera
+    )
+    let pick = try #require(center)
+    #expect(surface.sourceNodes.indices.contains(pick.surfaceVertex))
+    #expect(mesh.nodes.indices.contains(pick.sourceNode))
+    #expect(pick.barycentric.min() >= -1e-5)
+
+    let background = SurfacePicker.pick(
+        surface: surface,
+        displacements: scene.displacements,
+        point: CGPoint(x: -50, y: -50),
+        viewSize: size,
+        camera: camera
+    )
+    #expect(background == nil)
+}

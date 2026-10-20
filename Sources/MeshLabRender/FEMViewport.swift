@@ -12,27 +12,32 @@ public struct FEMViewport: NSViewRepresentable {
     public var scene: RenderScene?
     public var options: RenderOptions
     public var initialCamera: OrbitCamera?
+    public var onPick: ((SurfacePick?) -> Void)?
 
     public init(
         scene: RenderScene?,
         options: RenderOptions = RenderOptions(),
-        initialCamera: OrbitCamera? = nil
+        initialCamera: OrbitCamera? = nil,
+        onPick: ((SurfacePick?) -> Void)? = nil
     ) {
         self.scene = scene
         self.options = options
         self.initialCamera = initialCamera
+        self.onPick = onPick
     }
 
     public init(
         surface: SurfaceMesh,
         result: StaticResult,
         options: RenderOptions = RenderOptions(),
-        initialCamera: OrbitCamera? = nil
+        initialCamera: OrbitCamera? = nil,
+        onPick: ((SurfacePick?) -> Void)? = nil
     ) {
         self.init(
             scene: RenderScene(surface: surface, result: result),
             options: options,
-            initialCamera: initialCamera
+            initialCamera: initialCamera,
+            onPick: onPick
         )
     }
 
@@ -40,13 +45,15 @@ public struct FEMViewport: NSViewRepresentable {
         mesh: Mesh,
         result: StaticResult,
         options: RenderOptions = RenderOptions(),
-        initialCamera: OrbitCamera? = nil
+        initialCamera: OrbitCamera? = nil,
+        onPick: ((SurfacePick?) -> Void)? = nil
     ) {
         let surface = try? mesh.makeSurfaceMesh()
         self.init(
             scene: surface.map { RenderScene(surface: $0, result: result) },
             options: options,
-            initialCamera: initialCamera
+            initialCamera: initialCamera,
+            onPick: onPick
         )
     }
 
@@ -72,7 +79,11 @@ public struct FEMViewport: NSViewRepresentable {
         view.onZoom = { [weak coordinator = context.coordinator] delta in
             coordinator?.zoom(delta: delta)
         }
+        view.onPick = { [weak coordinator = context.coordinator] point in
+            coordinator?.pick(at: point, originTopLeft: false)
+        }
 
+        context.coordinator.onPick = onPick
         context.coordinator.attach(to: view)
         context.coordinator.update(
             scene: scene,
@@ -83,6 +94,7 @@ public struct FEMViewport: NSViewRepresentable {
     }
 
     public func updateNSView(_ nsView: OrbitMTKView, context: Context) {
+        context.coordinator.onPick = onPick
         context.coordinator.update(
             scene: scene,
             options: options,
@@ -98,6 +110,8 @@ public struct FEMViewport: NSViewRepresentable {
         nsView.onOrbit = nil
         nsView.onPan = nil
         nsView.onZoom = nil
+        nsView.onPick = nil
+        coordinator.onPick = nil
     }
 }
 
@@ -105,20 +119,39 @@ public final class OrbitMTKView: MTKView {
     var onOrbit: ((CGFloat, CGFloat) -> Void)?
     var onPan: ((CGFloat, CGFloat) -> Void)?
     var onZoom: ((CGFloat) -> Void)?
+    var onPick: ((CGPoint) -> Void)?
 
     private var lastDrag = NSPoint.zero
+    private var mouseDownPoint: NSPoint?
+    private var didDrag = false
 
     public override var acceptsFirstResponder: Bool { true }
 
     public override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        lastDrag = convert(event.locationInWindow, from: nil)
+        let point = convert(event.locationInWindow, from: nil)
+        lastDrag = point
+        mouseDownPoint = point
+        didDrag = false
     }
 
     public override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        if let mouseDownPoint,
+           hypot(point.x - mouseDownPoint.x, point.y - mouseDownPoint.y) > 3 {
+            didDrag = true
+        }
         onOrbit?(point.x - lastDrag.x, point.y - lastDrag.y)
         lastDrag = point
+    }
+
+    public override func mouseUp(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if !didDrag {
+            onPick?(point)
+        }
+        mouseDownPoint = nil
+        didDrag = false
     }
 
     public override func rightMouseDown(with event: NSEvent) {
@@ -145,27 +178,32 @@ public struct FEMViewport: UIViewRepresentable {
     public var scene: RenderScene?
     public var options: RenderOptions
     public var initialCamera: OrbitCamera?
+    public var onPick: ((SurfacePick?) -> Void)?
 
     public init(
         scene: RenderScene?,
         options: RenderOptions = RenderOptions(),
-        initialCamera: OrbitCamera? = nil
+        initialCamera: OrbitCamera? = nil,
+        onPick: ((SurfacePick?) -> Void)? = nil
     ) {
         self.scene = scene
         self.options = options
         self.initialCamera = initialCamera
+        self.onPick = onPick
     }
 
     public init(
         surface: SurfaceMesh,
         result: StaticResult,
         options: RenderOptions = RenderOptions(),
-        initialCamera: OrbitCamera? = nil
+        initialCamera: OrbitCamera? = nil,
+        onPick: ((SurfacePick?) -> Void)? = nil
     ) {
         self.init(
             scene: RenderScene(surface: surface, result: result),
             options: options,
-            initialCamera: initialCamera
+            initialCamera: initialCamera,
+            onPick: onPick
         )
     }
 
@@ -173,13 +211,15 @@ public struct FEMViewport: UIViewRepresentable {
         mesh: Mesh,
         result: StaticResult,
         options: RenderOptions = RenderOptions(),
-        initialCamera: OrbitCamera? = nil
+        initialCamera: OrbitCamera? = nil,
+        onPick: ((SurfacePick?) -> Void)? = nil
     ) {
         let surface = try? mesh.makeSurfaceMesh()
         self.init(
             scene: surface.map { RenderScene(surface: $0, result: result) },
             options: options,
-            initialCamera: initialCamera
+            initialCamera: initialCamera,
+            onPick: onPick
         )
     }
 
@@ -206,7 +246,11 @@ public struct FEMViewport: UIViewRepresentable {
         view.onZoom = { [weak coordinator = context.coordinator] delta in
             coordinator?.zoom(delta: delta)
         }
+        view.onPick = { [weak coordinator = context.coordinator] point in
+            coordinator?.pick(at: point, originTopLeft: true)
+        }
 
+        context.coordinator.onPick = onPick
         context.coordinator.attach(to: view)
         context.coordinator.update(
             scene: scene,
@@ -217,6 +261,7 @@ public struct FEMViewport: UIViewRepresentable {
     }
 
     public func updateUIView(_ uiView: OrbitMTKView, context: Context) {
+        context.coordinator.onPick = onPick
         context.coordinator.update(
             scene: scene,
             options: options,
@@ -232,6 +277,8 @@ public struct FEMViewport: UIViewRepresentable {
         uiView.onOrbit = nil
         uiView.onPan = nil
         uiView.onZoom = nil
+        uiView.onPick = nil
+        coordinator.onPick = nil
     }
 }
 
@@ -239,6 +286,7 @@ public final class OrbitMTKView: MTKView {
     var onOrbit: ((CGFloat, CGFloat) -> Void)?
     var onPan: ((CGFloat, CGFloat) -> Void)?
     var onZoom: ((CGFloat) -> Void)?
+    var onPick: ((CGPoint) -> Void)?
 
     private var lastPinchScale: CGFloat = 1
 
@@ -265,6 +313,13 @@ public final class OrbitMTKView: MTKView {
 
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch))
         addGestureRecognizer(pinch)
+
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+        addGestureRecognizer(tap)
+    }
+
+    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        onPick?(gesture.location(in: self))
     }
 
     @objc private func handleOrbitPan(_ gesture: UIPanGestureRecognizer) {

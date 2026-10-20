@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "MeshLab", targets: ["MeshLab"]),
         .library(name: "MeshLabCore", targets: ["MeshLabCore"]),
         .library(name: "MeshLabRender", targets: ["MeshLabRender"]),
+        .executable(name: "MeshLabApp", targets: ["MeshLabApp"]),
         .executable(name: "MeshLabBenchmarks", targets: ["MeshLabBenchmarks"]),
     ],
     dependencies: [
@@ -47,6 +48,11 @@ let package = Package(
         .target(
             name: "MeshLab",
             dependencies: ["MeshLabCore", "MeshLabRender"]
+        ),
+        .executableTarget(
+            name: "MeshLabApp",
+            dependencies: ["MeshLab"],
+            path: "Sources/MeshLabApp"
         ),
         .executableTarget(
             name: "MeshLabBenchmarks",

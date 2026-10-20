@@ -1,7 +1,7 @@
 import Foundation
 import simd
 
-public enum ElementType: String, Sendable, Hashable {
+public enum ElementType: String, Sendable, Hashable, Codable {
     case tetrahedron4
     case triangle3
 
@@ -34,7 +34,7 @@ public enum ElementType: String, Sendable, Hashable {
     }
 }
 
-public struct Element: Sendable, Hashable {
+public struct Element: Sendable, Hashable, Codable {
     public let type: ElementType
     public let nodes: [Int]
 
@@ -55,7 +55,7 @@ public enum MeshError: Error, Equatable, Sendable {
     case emptySurface
 }
 
-public struct Mesh: Sendable {
+public struct Mesh: Sendable, Codable, Equatable {
     public var nodes: [SIMD3<Double>]
     public var elements: [Element]
 
@@ -253,6 +253,26 @@ public struct Mesh: Sendable {
             let b = coordinates[2] - coordinates[0]
             return 0.5 * abs(a.x * b.y - a.y * b.x)
         }
+    }
+}
+
+extension Mesh {
+    private enum CodingKeys: String, CodingKey {
+        case nodes
+        case elements
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let nodes = try container.decode([SIMD3<Double>].self, forKey: .nodes)
+        let elements = try container.decode([Element].self, forKey: .elements)
+        try self.init(nodes: nodes, elements: elements)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(nodes, forKey: .nodes)
+        try container.encode(elements, forKey: .elements)
     }
 }
 

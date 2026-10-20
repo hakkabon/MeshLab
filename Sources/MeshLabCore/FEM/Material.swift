@@ -1,6 +1,6 @@
 import Foundation
 
-public enum PlaneKinematics: String, Sendable, Hashable {
+public enum PlaneKinematics: String, Sendable, Hashable, Codable {
     case planeStress
     case planeStrain
 }
@@ -12,7 +12,7 @@ public enum MaterialError: Error, Equatable, Sendable {
 }
 
 /// Isotropic linear elastic material.
-public struct ElasticMaterial: Sendable, Hashable {
+public struct ElasticMaterial: Sendable, Hashable, Codable {
     public var youngModulus: Double
     public var poissonRatio: Double
     public var density: Double
@@ -43,6 +43,25 @@ public struct ElasticMaterial: Sendable, Hashable {
         self.density = density
         self.planeKinematics = planeKinematics
         self.thickness = thickness
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case youngModulus
+        case poissonRatio
+        case density
+        case planeKinematics
+        case thickness
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            youngModulus: container.decode(Double.self, forKey: .youngModulus),
+            poissonRatio: container.decode(Double.self, forKey: .poissonRatio),
+            density: container.decode(Double.self, forKey: .density),
+            planeKinematics: container.decode(PlaneKinematics.self, forKey: .planeKinematics),
+            thickness: container.decode(Double.self, forKey: .thickness)
+        )
     }
 
     public var shearModulus: Double {

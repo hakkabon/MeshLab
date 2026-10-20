@@ -2,14 +2,14 @@ import Accelerate
 import Foundation
 import NumericCoreSparse
 
-public enum SparsePreconditionerKind: Sendable, Hashable {
+public enum SparsePreconditionerKind: Sendable, Hashable, Codable {
     case none
     case jacobi
     case ilu0
     case incompleteCholesky
 }
 
-public struct SparseIterativeSettings: Sendable, Hashable {
+public struct SparseIterativeSettings: Sendable, Hashable, Codable {
     public var maxIterations: Int
     public var tolerance: Double
     public var initialSolution: [Double]?
@@ -29,13 +29,13 @@ public struct SparseIterativeSettings: Sendable, Hashable {
 }
 
 /// Ordering used by reusable NumericCore factorizations.
-public enum SparseOrderingKind: Sendable, Hashable {
+public enum SparseOrderingKind: Sendable, Hashable, Codable {
     case natural
     case minimumDegree
 }
 
 /// Options for NumericCore's reusable direct factorizations.
-public struct SparseDirectSettings: Sendable, Hashable {
+public struct SparseDirectSettings: Sendable, Hashable, Codable {
     public var ordering: SparseOrderingKind
     public var pivotTolerance: Double
     public var dropTolerance: Double
@@ -77,7 +77,7 @@ public struct SparseInertiaReport: Sendable, Hashable {
 /// NumericCore direct methods expose symbolic reuse and refinement, while its
 /// iterative methods are available for very large systems where a direct
 /// factorization is undesirable.
-public enum SparseSolverMethod: Sendable, Hashable {
+public enum SparseSolverMethod: Sendable, Hashable, Codable {
     case automatic
     case accelerateCholesky
     case accelerateLDLT
