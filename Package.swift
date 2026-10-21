@@ -6,6 +6,7 @@ let package = Package(
     platforms: [
         .macOS(.v13),
         .iOS(.v16),
+        .visionOS(.v1),
     ],
     products: [
         .library(name: "MeshLab", targets: ["MeshLab"]),
@@ -13,6 +14,7 @@ let package = Package(
         .library(name: "MeshLabRender", targets: ["MeshLabRender"]),
         .executable(name: "MeshLabApp", targets: ["MeshLabApp"]),
         .executable(name: "MeshLabBenchmarks", targets: ["MeshLabBenchmarks"]),
+        .executable(name: "MeshLabSweep", targets: ["MeshLabSweep"]),
     ],
     dependencies: [
         // NumericCore is the numerical substrate. See
@@ -59,6 +61,11 @@ let package = Package(
             name: "MeshLabBenchmarks",
             dependencies: ["MeshLabCore", "MeshLabRender"],
             path: "Benchmarks/MeshLabBenchmarks"
+        ),
+        .executableTarget(
+            name: "MeshLabSweep",
+            dependencies: ["MeshLabCore"],
+            path: "Sources/MeshLabSweep"
         ),
         .testTarget(
             name: "MeshLabCoreTests",

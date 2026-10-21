@@ -414,6 +414,14 @@ final class WorkbenchModel: ObservableObject {
         project.deformationScale = min(max(scale, 0), 10_000)
     }
 
+    func setUseMatrixFree(_ enabled: Bool) {
+        project.useMatrixFree = enabled
+    }
+
+    func setMatrixFreeIterations(_ count: Int) {
+        project.matrixFreeOptions.maximumIterations = min(max(count, 1), 20_000)
+    }
+
     private func updateMaterial(
         youngModulus: Double? = nil,
         poissonRatio: Double? = nil,
@@ -713,6 +721,8 @@ private extension MeshLabProject {
             && loadScale == other.loadScale
             && solverMethod == other.solverMethod
             && directSettings == other.directSettings
+            && useMatrixFree == other.useMatrixFree
+            && matrixFreeOptions == other.matrixFreeOptions
             && analysis == other.analysis
             && modalModeCount == other.modalModeCount
             && thermalStudy == other.thermalStudy

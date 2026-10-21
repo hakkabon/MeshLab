@@ -11,6 +11,7 @@ relationship to the NumericCore ecosystem.
 | [0004](0004-product-workflow-and-project-format.md) | Accepted | Use versioned JSON projects, off-main-actor solves, CPU surface picking, and a legend that mirrors the Metal palette. |
 | [0005](0005-dynamics-and-thermal-coupling.md) | Accepted | Add 3D consistent mass, modal/transient dynamics, steady thermal analysis, one-way thermal strain, and project schema v2. |
 | [0006](0006-design-loop.md) | Accepted | Add parametric sweeps, self-adjoint compliance sensitivities, SIMP topology optimization, discrete shape optimization, and project schema v3. |
+| [0007](0007-platform-and-scale.md) | Accepted | Add matrix-free static solves, batch sweep jobs and CLI, visionOS target support, and project schema v4. |
 
 When a decision changes, add a new ADR that supersedes the old one rather than
 silently rewriting history.

@@ -169,7 +169,7 @@ public final class OrbitMTKView: MTKView {
     }
 }
 
-#elseif os(iOS) || os(tvOS)
+#elseif os(iOS) || os(tvOS) || os(visionOS)
 import MetalKit
 import SwiftUI
 import UIKit

@@ -35,7 +35,7 @@ public struct ThermalStudy: Sendable, Hashable, Codable {
 /// The project owns the mesh and analysis definition. Display settings travel
 /// with the document so reopening a project restores the same review state.
 public struct MeshLabProject: Sendable, Equatable, Codable {
-    public static let currentSchemaVersion = 3
+    public static let currentSchemaVersion = 4
 
     public var schemaVersion: Int
     public var name: String
@@ -54,6 +54,8 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
     public var selectedMode: Int
     public var thermalStudy: ThermalStudy
     public var designStudy: DesignStudy
+    public var useMatrixFree: Bool
+    public var matrixFreeOptions: MatrixFreeOptions
 
     public init(
         name: String = "Untitled",
@@ -71,7 +73,9 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         modalModeCount: Int = 6,
         selectedMode: Int = 0,
         thermalStudy: ThermalStudy = ThermalStudy(),
-        designStudy: DesignStudy = DesignStudy()
+        designStudy: DesignStudy = DesignStudy(),
+        useMatrixFree: Bool = false,
+        matrixFreeOptions: MatrixFreeOptions = MatrixFreeOptions()
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.name = name
@@ -90,6 +94,8 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         self.selectedMode = selectedMode
         self.thermalStudy = thermalStudy
         self.designStudy = designStudy
+        self.useMatrixFree = useMatrixFree
+        self.matrixFreeOptions = matrixFreeOptions
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -110,6 +116,8 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         case selectedMode
         case thermalStudy
         case designStudy
+        case useMatrixFree
+        case matrixFreeOptions
     }
 
     public init(from decoder: Decoder) throws {
@@ -150,6 +158,14 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
             DesignStudy.self,
             forKey: .designStudy
         ) ?? DesignStudy()
+        self.useMatrixFree = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .useMatrixFree
+        ) ?? false
+        self.matrixFreeOptions = try container.decodeIfPresent(
+            MatrixFreeOptions.self,
+            forKey: .matrixFreeOptions
+        ) ?? MatrixFreeOptions()
     }
 
     public func makeModel() -> FEMModel {
@@ -183,7 +199,8 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
     public func makeAnalysisOptions() -> AnalysisOptions {
         AnalysisOptions(
             solverMethod: solverMethod,
-            directSettings: directSettings
+            directSettings: directSettings,
+            matrixFreeOptions: useMatrixFree ? matrixFreeOptions : nil
         )
     }
 

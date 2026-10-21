@@ -396,7 +396,31 @@ struct WorkbenchView: View {
                         Text(preset.title).tag(preset)
                     }
                 }
-                if usesNumericCoreDirect {
+                if model.project.analysis != .modal {
+                    Toggle(
+                        "Matrix-free CG",
+                        isOn: Binding(
+                            get: { model.project.useMatrixFree },
+                            set: { model.setUseMatrixFree($0) }
+                        )
+                    )
+                    if model.project.useMatrixFree {
+                        Stepper(
+                            "CG iterations: \(model.project.matrixFreeOptions.maximumIterations)",
+                            value: Binding(
+                                get: {
+                                    model.project.matrixFreeOptions.maximumIterations
+                                },
+                                set: { model.setMatrixFreeIterations($0) }
+                            ),
+                            in: 1...20_000
+                        )
+                        Text("Uses element-by-element stiffness products and Jacobi-preconditioned conjugate gradients.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if usesNumericCoreDirect, !model.project.useMatrixFree {
                     Picker(
                         "Ordering",
                         selection: Binding(
@@ -841,7 +865,11 @@ struct WorkbenchView: View {
     }
 
     private func solverSummary(_ report: SparseSolveReport) -> String {
-        var parts = [SolverPreset(method: report.method).title]
+        var parts = [
+            model.project.useMatrixFree
+                ? "Matrix-free CG"
+                : SolverPreset(method: report.method).title,
+        ]
         if let iterations = report.iterations {
             parts.append("\(iterations) it")
         }

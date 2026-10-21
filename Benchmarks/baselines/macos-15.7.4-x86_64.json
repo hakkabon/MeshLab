@@ -8,47 +8,54 @@
   ],
   "dofCount" : 1275,
   "elementCount" : 1536,
-  "generatedAt" : "2026-10-20T12:16:23Z",
+  "generatedAt" : "2026-10-21T04:27:25Z",
   "measurements" : [
     {
       "iterations" : 5,
-      "maxMilliseconds" : 1.292689,
-      "medianMilliseconds" : 1.235198,
-      "minMilliseconds" : 1.23277,
+      "maxMilliseconds" : 1.492093,
+      "medianMilliseconds" : 1.257851,
+      "minMilliseconds" : 1.216902,
       "name" : "mesh.generation"
     },
     {
       "iterations" : 5,
-      "maxMilliseconds" : 4.954021,
-      "medianMilliseconds" : 4.242633,
-      "minMilliseconds" : 4.158564,
+      "maxMilliseconds" : 4.574983,
+      "medianMilliseconds" : 4.344224,
+      "minMilliseconds" : 4.191008,
       "name" : "surface.extraction"
     },
     {
       "iterations" : 5,
-      "maxMilliseconds" : 32.967593,
-      "medianMilliseconds" : 30.040007,
-      "minMilliseconds" : 29.890738,
+      "maxMilliseconds" : 35.537277,
+      "medianMilliseconds" : 33.229511,
+      "minMilliseconds" : 31.839898,
       "name" : "assembly.solve"
     },
     {
       "iterations" : 5,
-      "maxMilliseconds" : 0.002569,
-      "medianMilliseconds" : 0.002337,
-      "minMilliseconds" : 0.002286,
+      "maxMilliseconds" : 66.391353,
+      "medianMilliseconds" : 65.785891,
+      "minMilliseconds" : 63.916025,
+      "name" : "matrixfree.solve"
+    },
+    {
+      "iterations" : 5,
+      "maxMilliseconds" : 0.002757,
+      "medianMilliseconds" : 0.00248,
+      "minMilliseconds" : 0.00246,
       "name" : "render.scene"
     },
     {
       "iterations" : 2,
-      "maxMilliseconds" : 36.716257,
-      "medianMilliseconds" : 36.1175345,
-      "minMilliseconds" : 35.518812,
+      "maxMilliseconds" : 41.215763,
+      "medianMilliseconds" : 40.897321000000005,
+      "minMilliseconds" : 40.578879,
       "name" : "end-to-end"
     }
   ],
   "nodeCount" : 425,
   "platform" : "Version 15.7.4 (Build 24G517)",
   "schemaVersion" : 1,
-  "solver" : "automatic",
+  "solver" : "automatic + matrix-free CG",
   "surfaceTriangleCount" : 576
 }

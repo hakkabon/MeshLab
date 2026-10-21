@@ -105,6 +105,17 @@ struct MeshLabBenchmarks {
             return result.maxDisplacement
         }
 
+        let matrixFreeMeasurement = try measure(
+            name: "matrixfree.solve",
+            iterations: configuration.iterations,
+            warmup: warmup
+        ) {
+            let result = try StaticAnalysis(options: AnalysisOptions(
+                matrixFreeOptions: MatrixFreeOptions()
+            )).solve(fixture.model)
+            return result.maxDisplacement
+        }
+
         let sceneMeasurement = measure(
             name: "render.scene",
             iterations: configuration.iterations,
@@ -127,6 +138,7 @@ struct MeshLabBenchmarks {
             meshMeasurement,
             surfaceMeasurement,
             solveMeasurement,
+            matrixFreeMeasurement,
             sceneMeasurement,
             endToEndMeasurement,
         ]
@@ -137,7 +149,7 @@ struct MeshLabBenchmarks {
             platform: ProcessInfo.processInfo.operatingSystemVersionString,
             architecture: architectureName,
             buildConfiguration: buildConfigurationName,
-            solver: "automatic",
+            solver: "automatic + matrix-free CG",
             divisions: [
                 configuration.divisions.x,
                 configuration.divisions.y,

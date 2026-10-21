@@ -7,8 +7,8 @@ NumericCore numerical stack and a real-time Metal renderer.
 It provides linear-elastic static, modal, transient, and steady thermal
 analysis of tetrahedral and triangular meshes, stress recovery, compliance
 design studies, an interactive Metal viewport, and a SwiftUI product slice for
-opening, solving, optimizing, inspecting, and exporting projects on macOS and
-iOS.
+opening, solving, optimizing, inspecting, and exporting projects on macOS, iOS,
+and visionOS.
 
 ## Status
 
@@ -70,12 +70,27 @@ P4 (Design loop) is complete:
 - asynchronous design studies in the workbench with result summaries and
   best-sample, topology, and shape field rendering.
 
-The package has 56 tests covering vector/dense/sparse math, mesh topology and
+P5 (Platform and scale) is complete:
+
+- element-by-element matrix-free static solves with Jacobi-preconditioned
+  conjugate gradients, including prescribed values and thermal-stress loading;
+- matrix-free controls in the project schema and workbench, with the assembled
+  direct solver retained as the default;
+- reusable batch-sweep jobs with bounded concurrency, ordered summaries,
+  structured per-request failures, and JSON job/result round trips;
+- a `MeshLabSweep` command-line worker for local or cloud batch execution;
+- project schema v4 with automatic v1/v2/v3 migration;
+- a visionOS 1.0 package target that shares the SwiftUI workbench and
+  UIKit/MetalKit viewport bridge.
+
+The package has 64 tests covering vector/dense/sparse math, mesh topology and
 surface extraction, linear-static FEM equilibrium, solver backends and
 factorization reuse, modal/transient dynamics, thermal conduction and thermal
 stress, parametric sweeps, compliance adjoints, topology/shape optimization,
-project files and schema migration, CSV export, camera math, render-scene
-mapping, stress palettes, surface picking, and Metal pipeline creation.
+matrix-free parity and convergence, batch-sweep scheduling and failure
+reporting, project files and schema migration, CSV export, camera math,
+render-scene mapping, stress palettes, surface picking, and Metal pipeline
+creation.
 
 ## Architecture
 
@@ -111,7 +126,8 @@ mapping, stress palettes, surface picking, and Metal pipeline creation.
 | `MeshLabRender` | Surface extraction consumption, `RenderScene`, orbit camera, Metal pipeline, shared result buffers, `MTKView`/SwiftUI bridges. |
 | `MeshLab` | Umbrella re-export of Core and Render. |
 | `MeshLabApp` | SwiftUI workbench: project import/export, asynchronous solve and design studies, inspection, picking, and colorbar. |
-| `MeshLabBenchmarks` | Release-mode timing harness for mesh generation, assembly/solve, and render-scene construction. |
+| `MeshLabBenchmarks` | Release-mode timing harness for mesh generation, assembled and matrix-free solves, and render-scene construction. |
+| `MeshLabSweep` | JSON batch-sweep worker with bounded parallelism for local or cloud execution. |
 
 ### Ownership boundary
 
@@ -131,7 +147,7 @@ and its consequences.
 ## Requirements
 
 - Swift 6.1 or newer
-- macOS 13+ or iOS 16+
+- macOS 13+, iOS 16+, or visionOS 1+
 - Xcode 16.4+ for the Metal toolchain and Apple SDKs
 
 ## Build and test
@@ -142,11 +158,31 @@ swift build
 swift test
 swift build -c release
 swift run MeshLabApp
+swift run MeshLabSweep --help
 ```
 
 The package resolves `Swift-NumericCore` 1.x from a released tag and commits
 `Package.resolved` for reproducibility. See
 [ADR 0002](docs/decisions/0002-dependency-and-release-policy.md).
+
+## Batch sweeps
+
+`MeshLabSweep` reads a `SweepJob` JSON document and writes a
+`SweepBatchResult` JSON document. Each request carries a complete
+`MeshLabProject` and selects either its configured analysis or its configured
+design study. Requests run with bounded concurrency, results preserve request
+order, and individual failures are returned as structured summaries without
+aborting the batch. A job contains a name and a list of requests; each request
+embeds a complete exported `MeshLabProject` and selects `analysis` or `design`.
+
+```bash
+swift run -c release MeshLabSweep sweep.json --output results.json --concurrency 8
+swift run -c release MeshLabSweep - < sweep.json > results.json
+```
+
+The worker exits with status 1 when any request fails. It does not yet provide
+cloud storage, authentication, resumable jobs, or platform-specific GPU
+execution; those remain deployment-layer concerns.
 
 ## Benchmarks
 
@@ -196,6 +232,10 @@ the environment it was captured on.
 - Boundary surface extraction with outward face normals and source-node mapping.
 - Solver selection: Accelerate Cholesky/LDLT, NumericCore Cholesky/LU/LDLT,
   reusable NumericCore factorizations, and CG/BiCGSTAB/GMRES with diagnostics.
+- Optional matrix-free static and thermal-stress solves using an
+  element-by-element stiffness operator and Jacobi-preconditioned CG.
+- Batch analyses and design studies through `SweepJob`, `SweepRunner`, and the
+  `MeshLabSweep` JSON worker.
 - Solver diagnostics: backward error, refinement steps, factor nonzeros, and
   LDLT inertia; same-pattern numeric refactorization.
 - Connectivity, unsupported-DOF, and free-DOF residual checks.
@@ -207,8 +247,9 @@ the environment it was captured on.
   inspection and thermal boundary summary.
 - Parametric, topology, and shape design studies with asynchronous runs,
   summaries, and best-sample/optimized-field rendering.
-- Solver picker for Accelerate and NumericCore direct/iterative methods.
-- Versioned JSON project import/export (schema v3, v1/v2 migration); static,
+- Solver picker for Accelerate and NumericCore direct/iterative methods, plus
+  a matrix-free CG path for static and thermal-structural studies.
+- Versioned JSON project import/export (schema v4, v1/v2/v3 migration); static,
   modal, and thermal CSV result export.
 - Asynchronous solve with progress, cancellation of stale results, and errors.
 - Surface picking resolves the deformed hit point to a source node.
@@ -220,7 +261,7 @@ the environment it was captured on.
 - Two-sided lighting and a Z-up orbit camera.
 - Mouse/trackpad and touch gestures for orbit, pan, and zoom.
 - Shared `MTLBuffer`s with a direct field-update path.
-- macOS `NSViewRepresentable` and iOS `UIViewRepresentable` bridges.
+- macOS `NSViewRepresentable` and iOS/visionOS `UIViewRepresentable` bridges.
 - 120 FPS target; actual frame rate depends on the display and model size.
 
 ## Current limitations
@@ -230,8 +271,9 @@ the environment it was captured on.
 - Modal and transient analyses require homogeneous Dirichlet constraints.
 - Transient dynamics is a library API only; the workbench does not yet expose
   load histories or time animation.
-- Thermal-structural coupling is one-way and currently 3D-only. Plane-strain
-  thermal stress needs a separate reduced constitutive treatment.
+- Thermal-structural coupling remains one-way and currently 3D-only.
+  Plane-strain thermal stress needs a separate reduced constitutive treatment,
+  and two-way coupling needs a coupled/transient governing formulation.
 - Thermal analysis is steady-state only; convection and radiation are not
   implemented.
 - No nonlinear statics, contact, buckling, or plasticity yet.
@@ -241,7 +283,7 @@ the environment it was captured on.
   metrics, or adaptivity.
 - No document-based autosave or report generation yet.
 - Import is limited to MeshLab project JSON; OBJ/STL/CAD import is not
-  implemented. Project schema v3 files are not readable by older clients.
+  implemented. Project schema v4 files are not readable by older clients.
 - Design optimization is limited to linear-static compliance with homogeneous
   Dirichlet constraints and no thermal loading.
 - Topology optimization reports densities but does not render a density field;
@@ -249,11 +291,21 @@ the environment it was captured on.
   manufacturability constraints.
 - Design studies do not yet offer per-iteration progress or design-result CSV
   export.
+- Matrix-free solves use Jacobi-preconditioned CG and are limited to symmetric
+  positive-definite static/thermal-stress systems; modal, transient, and
+  topology solves still use assembled matrices.
+- NumericCore's MPS backend is not yet usable, so no GPU numerical path is
+  shipped. The matrix-free CPU path is the current scale-out option.
+- Batch sweeps hold the full job and result set in memory and do not yet
+  support resume, retries, artifact storage, or authentication.
 - Rendering lacks clipping, vector glyphs, and time animation.
 - Picking is CPU ray casting and will need a spatial index or GPU picking for
   very large surfaces.
 - Shaders are compiled at runtime; there is no precompiled `.metallib` yet.
-- iOS is built from shared sources but is not yet covered by a dedicated CI job.
+- iOS and visionOS are built from shared sources but are not yet covered by
+  dedicated CI jobs. A visionOS runtime was not installed on the development
+  host used for this change, so the visionOS target has source-level support
+  but no CI or runtime validation yet.
 - The benchmark baseline was captured on an Intel Mac with a discrete GPU, so
   it is not representative of Apple Silicon unified-memory performance.
 
@@ -265,8 +317,9 @@ Sources/
   MeshLabRender/      camera, renderer, SwiftUI bridges, MSL, picking, colorbar
   MeshLab/            umbrella module
   MeshLabApp/         SwiftUI workbench executable
+  MeshLabSweep/       JSON batch-sweep command-line worker
 Tests/
-  MeshLabCoreTests/   math, mesh, FEM tests
+  MeshLabCoreTests/   math, mesh, FEM, design, and scale tests
   MeshLabRenderTests/ camera, scene, Metal pipeline tests
 Benchmarks/
   MeshLabBenchmarks/  release-mode timing harness
@@ -292,15 +345,18 @@ Scripts/
   elements, shells, and beams.
 - **P4 — Design loop (complete):** parametric studies, adjoint sensitivities,
   shape and topology optimization.
-- **P5 — Platform and scale:** GPU/matrix-free paths, cloud sweeps, visionOS,
-  multiphysics coupling.
+- **P5 — Platform and scale (complete):** matrix-free CPU solves, cloud-ready
+  batch sweeps and CLI, visionOS target support, and matrix-free
+  thermal-structural coupling.
+- **P6 — GPU and advanced coupling:** Metal/MPS numerical paths, resumable
+  cloud workers, and two-way multiphysics.
 
 ## Contributing
 
 - Keep reusable numerical algorithms in NumericCore. MeshLab may keep
   analysis-specific adapters where NumericCore lacks an equivalent API, such as
-  the fixed-step Newmark path in ADR 0005; contribute generalizable pieces
-  upstream.
+  the fixed-step Newmark path in ADR 0005 and matrix-free CG in ADR 0007;
+  contribute generalizable pieces upstream.
 - Only `MeshLabCore` may depend on NumericCore products.
 - Do not import `NCBindings` or generated UniFFI symbols outside the Swift
   package boundary.

@@ -188,10 +188,43 @@ import simd
         try MeshLabProjectFile.encode(project)
     )
     #expect(decoded == project)
-    #expect(decoded.schemaVersion == 3)
+    #expect(decoded.schemaVersion == 4)
     #expect(decoded.designStudy.kind == .topology)
     #expect(decoded.designStudy.topology.volumeFraction == 0.42)
     #expect(decoded.designStudy.shape.selectionAxis == 1)
+}
+
+@Test func projectReadsVersionThreeAndDefaultsMatrixFreeSettings() throws {
+    let project = try MeshLabProject.cantileverExample()
+    let data = try MeshLabProjectFile.encode(project)
+    var object = try #require(
+        try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    )
+    object["schemaVersion"] = 3
+    object.removeValue(forKey: "useMatrixFree")
+    object.removeValue(forKey: "matrixFreeOptions")
+    let v3Data = try JSONSerialization.data(withJSONObject: object)
+
+    let decoded = try MeshLabProjectFile.decode(v3Data)
+    #expect(decoded.schemaVersion == 3)
+    #expect(decoded.useMatrixFree == false)
+    #expect(decoded.matrixFreeOptions == MatrixFreeOptions())
+}
+
+@Test func projectRoundTripsMatrixFreeSettings() throws {
+    var project = try MeshLabProject.cantileverExample()
+    project.useMatrixFree = true
+    project.matrixFreeOptions.maximumIterations = 321
+    project.matrixFreeOptions.relativeTolerance = 1e-9
+    project.matrixFreeOptions.useJacobiPreconditioner = false
+
+    let decoded = try MeshLabProjectFile.decode(
+        try MeshLabProjectFile.encode(project)
+    )
+    #expect(decoded == project)
+    #expect(decoded.useMatrixFree)
+    #expect(decoded.matrixFreeOptions.maximumIterations == 321)
+    #expect(decoded.makeAnalysisOptions().matrixFreeOptions != nil)
 }
 
 @Test func projectReadsVersionTwoAndDefaultsDesignStudy() throws {

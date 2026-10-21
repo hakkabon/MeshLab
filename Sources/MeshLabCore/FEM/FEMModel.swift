@@ -99,20 +99,41 @@ public struct FEMModel: Sendable {
     }
 }
 
+public struct MatrixFreeOptions: Sendable, Hashable, Codable {
+    public var maximumIterations: Int
+    public var relativeTolerance: Double
+    public var useJacobiPreconditioner: Bool
+
+    public init(
+        maximumIterations: Int = 1_000,
+        relativeTolerance: Double = 1e-8,
+        useJacobiPreconditioner: Bool = true
+    ) {
+        self.maximumIterations = maximumIterations
+        self.relativeTolerance = relativeTolerance
+        self.useJacobiPreconditioner = useJacobiPreconditioner
+    }
+}
+
 public struct AnalysisOptions: Sendable {
     public var solverMethod: SparseSolverMethod
     /// Ordering and refinement options used by NumericCore direct solvers.
     public var directSettings: SparseDirectSettings
     public var computeReactions: Bool
+    /// When present, static analysis uses an element-by-element matrix-free
+    /// conjugate-gradient solve instead of assembling a global sparse matrix.
+    public var matrixFreeOptions: MatrixFreeOptions?
 
     public init(
         solverMethod: SparseSolverMethod = .automatic,
         directSettings: SparseDirectSettings = SparseDirectSettings(),
-        computeReactions: Bool = true
+        computeReactions: Bool = true,
+        matrixFreeOptions: MatrixFreeOptions? = nil
     ) {
         self.solverMethod = solverMethod
         self.directSettings = directSettings
         self.computeReactions = computeReactions
+        self.matrixFreeOptions = matrixFreeOptions
     }
 }
 
@@ -163,8 +184,16 @@ public struct StaticAnalysis: Sendable {
 
         let externalLoads = try FEMAssembly.loadVector(model)
 
+        let matrixFree = options.matrixFreeOptions
         var triplets: [SparseTriplet] = []
-        triplets.reserveCapacity(mesh.elements.count * 64)
+        if matrixFree == nil {
+            triplets.reserveCapacity(mesh.elements.count * 64)
+        }
+        var elementOperators: [ElementStiffnessOperator.Element] = []
+        if matrixFree != nil {
+            elementOperators.reserveCapacity(mesh.elements.count)
+        }
+        var diagonal = [Double](repeating: 0, count: mesh.dofCount)
 
         var kinematics: [ElementKinematics] = []
         kinematics.reserveCapacity(mesh.elements.count)
@@ -182,6 +211,8 @@ public struct StaticAnalysis: Sendable {
             let localDOFs = model.elementDOFs(elementIndex)
             let size = data.dofCount
             for row in 0..<size {
+                diagonal[localDOFs[row]] += stiffness[row * size + row] * scale
+                guard matrixFree == nil else { continue }
                 for column in 0...row {
                     let value = stiffness[row * size + column] * scale
                     guard value != 0 else { continue }
@@ -191,6 +222,13 @@ public struct StaticAnalysis: Sendable {
                         value: value
                     ))
                 }
+            }
+            if matrixFree != nil {
+                elementOperators.append(ElementStiffnessOperator.Element(
+                    dofs: localDOFs,
+                    size: size,
+                    stiffness: stiffness.map { $0 * scale }
+                ))
             }
         }
 
@@ -203,52 +241,94 @@ public struct StaticAnalysis: Sendable {
             rightHandSide[dof] += thermal.loads[dof]
         }
 
-        let stiffness = try SparseMatrix.symmetric(
-            size: mesh.dofCount,
-            lowerTriplets: triplets
-        )
-
         let freeDOFs = try FEMAssembly.freeDOFs(
             count: mesh.dofCount,
             prescribed: prescribed
         )
 
         let unsupported = freeDOFs.filter {
-            let diagonal = stiffness.value(atRow: $0, column: $0)
-            return !(diagonal.isFinite && diagonal > 0)
+            let value = diagonal[$0]
+            return !(value.isFinite && value > 0)
         }
         guard unsupported.isEmpty else {
             throw FEMError.unconstrainedDegreesOfFreedom(unsupported)
         }
 
-        let reduction = try reduce(
-            stiffness: stiffness,
-            triplets: triplets,
-            rightHandSide: rightHandSide,
-            freeDOFs: freeDOFs,
-            prescribed: prescribed
-        )
-
-        let solver: SparseSolver
-        do {
-            solver = try SparseSolver(
-                matrix: reduction.matrix,
-                method: options.solverMethod,
-                directSettings: options.directSettings
-            )
-        } catch let error as SparseSolverError {
-            throw FEMError.solver(error)
-        } catch {
-            throw FEMError.solverFailure(String(describing: error))
-        }
-
+        let matrixFreeOperator: ElementStiffnessOperator?
+        var assembledStiffness: SparseMatrix?
         let report: SparseSolveReport
-        do {
-            report = try solver.solveWithReport(reduction.rightHandSide)
-        } catch let error as SparseSolverError {
-            throw FEMError.solver(error)
-        } catch {
-            throw FEMError.solverFailure(String(describing: error))
+        if let matrixFree {
+            let op = ElementStiffnessOperator(
+                dofCount: mesh.dofCount,
+                elements: elementOperators,
+                diagonal: diagonal
+            )
+            matrixFreeOperator = op
+            var prescribedVector = [Double](repeating: 0, count: mesh.dofCount)
+            for (dof, value) in prescribed {
+                prescribedVector[dof] = value
+            }
+            let prescribedProduct = op.multiply(prescribedVector)
+            let reducedRightHandSide = freeDOFs.map {
+                rightHandSide[$0] - prescribedProduct[$0]
+            }
+            let solved = try MatrixFreeConjugateGradient.solve(
+                operator: op,
+                freeDOFs: freeDOFs,
+                rightHandSide: reducedRightHandSide,
+                options: matrixFree
+            )
+            report = SparseSolveReport(
+                solution: solved.solution,
+                method: .conjugateGradient(SparseIterativeSettings(
+                    maxIterations: matrixFree.maximumIterations,
+                    tolerance: matrixFree.relativeTolerance,
+                    preconditioner: matrixFree.useJacobiPreconditioner
+                        ? .jacobi
+                        : .none
+                )),
+                iterations: solved.iterations,
+                relativeResidual: solved.relativeResidual,
+                factorNonZeroCount: nil,
+                converged: true,
+                backwardError: nil,
+                refinementSteps: nil,
+                inertia: nil
+            )
+        } else {
+            matrixFreeOperator = nil
+            let stiffness = try SparseMatrix.symmetric(
+                size: mesh.dofCount,
+                lowerTriplets: triplets
+            )
+            assembledStiffness = stiffness
+            let reduction = try reduce(
+                stiffness: stiffness,
+                triplets: triplets,
+                rightHandSide: rightHandSide,
+                freeDOFs: freeDOFs,
+                prescribed: prescribed
+            )
+            let solver: SparseSolver
+            do {
+                solver = try SparseSolver(
+                    matrix: reduction.matrix,
+                    method: options.solverMethod,
+                    directSettings: options.directSettings
+                )
+            } catch let error as SparseSolverError {
+                throw FEMError.solver(error)
+            } catch {
+                throw FEMError.solverFailure(String(describing: error))
+            }
+
+            do {
+                report = try solver.solveWithReport(reduction.rightHandSide)
+            } catch let error as SparseSolverError {
+                throw FEMError.solver(error)
+            } catch {
+                throw FEMError.solverFailure(String(describing: error))
+            }
         }
         guard report.solution.allSatisfy(\.isFinite) else {
             throw FEMError.nonFiniteSolution
@@ -262,7 +342,14 @@ public struct StaticAnalysis: Sendable {
             globalSolution[dof] = report.solution[index]
         }
 
-        let product = stiffness.multiply(globalSolution)
+        let product: [Double]
+        if let matrixFreeOperator {
+            product = matrixFreeOperator.multiply(globalSolution)
+        } else if let assembledStiffness {
+            product = assembledStiffness.multiply(globalSolution)
+        } else {
+            throw FEMError.solverFailure("Static solve produced no stiffness operator")
+        }
         let residual = zip(product, rightHandSide).map(-)
 
         let residualScale = max(
@@ -273,12 +360,19 @@ public struct StaticAnalysis: Sendable {
         let maximumFreeResidual = freeDOFs.reduce(0.0) { partial, dof in
             max(partial, abs(residual[dof]))
         }
-        if maximumFreeResidual > 1e-6 * residualScale {
+        let equilibriumTolerance = matrixFree.map {
+            max($0.relativeTolerance * 10, 1e-6)
+        } ?? 1e-6
+        if maximumFreeResidual > equilibriumTolerance * residualScale {
             throw FEMError.solverFailure(
                 "Free residual \(maximumFreeResidual) exceeds the equilibrium tolerance"
             )
         }
-        if let relativeResidual = report.relativeResidual, relativeResidual > 1e-5 {
+        let reportTolerance = matrixFree.map {
+            max($0.relativeTolerance * 10, 1e-5)
+        } ?? 1e-5
+        if let relativeResidual = report.relativeResidual,
+           relativeResidual > reportTolerance {
             throw FEMError.solverFailure(
                 "Solver reported relative residual \(relativeResidual)"
             )
