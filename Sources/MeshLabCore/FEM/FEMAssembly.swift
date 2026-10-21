@@ -124,6 +124,7 @@ enum FEMAssembly {
 
         let dimension = model.mesh.dimension
         for elementIndex in model.mesh.elements.indices {
+            try Task.checkCancellation()
             let data = try ElementKinematics.compute(
                 mesh: model.mesh,
                 material: model.material,
@@ -207,6 +208,7 @@ enum FEMAssembly {
         kinematics.reserveCapacity(model.mesh.elements.count)
 
         for elementIndex in model.mesh.elements.indices {
+            try Task.checkCancellation()
             let data = try ElementKinematics.compute(
                 mesh: model.mesh,
                 material: model.material,
@@ -242,6 +244,7 @@ enum FEMAssembly {
         var triplets: [SparseTriplet] = []
         triplets.reserveCapacity(model.mesh.elements.count * 64)
         for data in kinematics {
+            try Task.checkCancellation()
             appendSymmetric(
                 data.mass(density: model.material.density),
                 size: data.dofCount,
@@ -308,6 +311,7 @@ enum FEMAssembly {
         let expansion = model.material.thermalExpansion
 
         for data in kinematics {
+            try Task.checkCancellation()
             let change = data.nodeIndices.reduce(0.0) {
                 $0 + model.temperatureChange[$1]
             } / Double(data.nodeIndices.count)

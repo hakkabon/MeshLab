@@ -199,6 +199,7 @@ public struct StaticAnalysis: Sendable {
         kinematics.reserveCapacity(mesh.elements.count)
 
         for elementIndex in mesh.elements.indices {
+            try Task.checkCancellation()
             let data = try ElementKinematics.compute(
                 mesh: mesh,
                 material: model.material,
@@ -407,6 +408,7 @@ public struct StaticAnalysis: Sendable {
         var elementStresses: [ElementStress] = []
         elementStresses.reserveCapacity(mesh.elements.count)
         var maxVonMises = 0.0
+        var strainEnergy = 0.0
 
         for (index, data) in kinematics.enumerated() {
             let localDOFs = model.elementDOFs(data.elementIndex)
@@ -415,6 +417,10 @@ public struct StaticAnalysis: Sendable {
                 localDisplacement: localDisplacement,
                 initialStrain: thermal.strains[index]
             )
+            strainEnergy += data.strainEnergy(
+                localDisplacement: localDisplacement,
+                initialStrain: thermal.strains[index]
+            ) * (try model.stiffnessScale(forElement: data.elementIndex))
             let vonMises = ElementKinematics.vonMises(stress: stress)
             maxVonMises = max(maxVonMises, vonMises)
             elementStresses.append(ElementStress(
@@ -432,8 +438,6 @@ public struct StaticAnalysis: Sendable {
         let nodalVonMises = (0..<mesh.nodes.count).map { node in
             vonMisesCount[node] > 0 ? vonMisesSum[node] / Double(vonMisesCount[node]) : 0
         }
-
-        let strainEnergy = 0.5 * VectorMath.dot(globalSolution, product)
 
         return StaticResult(
             displacements: displacements,

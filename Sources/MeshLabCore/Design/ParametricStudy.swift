@@ -91,6 +91,7 @@ public struct ParametricStudy: Sendable, Hashable, Codable {
         var indices = [Int](repeating: 0, count: axes.count)
         var sampleIndex = 0
         while true {
+            try Task.checkCancellation()
             let values = zip(axes, indices).map { axis, index in
                 axis.values[index]
             }

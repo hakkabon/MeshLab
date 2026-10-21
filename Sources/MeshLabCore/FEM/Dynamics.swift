@@ -382,6 +382,7 @@ public struct TransientAnalysis: Sendable {
         ))
 
         for step in 1...options.steps {
+            try Task.checkCancellation()
             var rhs = forces[step]
             let predictor = zip(zip(u, v), acceleration).map { pair, a in
                 a0 * pair.0 + 2 * a1 * pair.1 + a

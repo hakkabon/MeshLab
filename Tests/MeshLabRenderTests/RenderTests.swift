@@ -54,8 +54,8 @@ private func cantileverModel() throws -> (mesh: Mesh, result: StaticResult) {
     }
 }
 
-@Test func emptyRenderSceneIsEmpty() {
-    let surface = SurfaceMesh(
+@Test func emptyRenderSceneIsEmpty() throws {
+    let surface = try SurfaceMesh(
         positions: [],
         normals: [],
         indices: [],
@@ -134,6 +134,25 @@ private func cantileverModel() throws -> (mesh: Mesh, result: StaticResult) {
         stressRange: scene.stressRange
     )
     #expect(renderer.hasGeometry)
+
+    let translation = SIMD3<Float>(3, -2, 1)
+    let movedSurface = try SurfaceMesh(
+        positions: surface.positions.map { $0 + translation },
+        normals: surface.normals,
+        indices: surface.indices,
+        sourceNodes: surface.sourceNodes
+    )
+    try renderer.update(scene: RenderScene(
+        surface: movedSurface,
+        result: result,
+        revision: scene.revision
+    ))
+    renderer.resetCamera()
+    #expect(simd_distance(
+        renderer.camera.target,
+        SIMD3<Float>(Float(mesh.center.x), Float(mesh.center.y), Float(mesh.center.z))
+            + translation
+    ) < 1e-5)
 
     #expect(throws: FEMRendererError.self) {
         try renderer.updateFields(

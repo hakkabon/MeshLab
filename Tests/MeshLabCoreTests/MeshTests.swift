@@ -81,6 +81,39 @@ import simd
     }
 }
 
+@Test func tinyWellConditionedElementsAreAccepted() throws {
+    let scale = 1e-6
+    let mesh = try Mesh(
+        nodes: [
+            SIMD3<Double>(0, 0, 0),
+            SIMD3<Double>(scale, 0, 0),
+            SIMD3<Double>(0, scale, 0),
+            SIMD3<Double>(0, 0, scale),
+        ],
+        elements: [Element(type: .tetrahedron4, nodes: [0, 1, 2, 3])]
+    )
+    #expect(abs(mesh.measure - pow(scale, 3) / 6) < 1e-30)
+}
+
+@Test func rawSurfaceMeshRejectsMismatchedBuffersAndIndices() {
+    #expect(throws: MeshError.self) {
+        _ = try SurfaceMesh(
+            positions: [.zero],
+            normals: [],
+            indices: [],
+            sourceNodes: [0]
+        )
+    }
+    #expect(throws: MeshError.self) {
+        _ = try SurfaceMesh(
+            positions: [.zero],
+            normals: [SIMD3<Float>(0, 0, 1)],
+            indices: [0, 0, 1],
+            sourceNodes: [0]
+        )
+    }
+}
+
 private func doubleVector(_ value: SIMD3<Float>) -> SIMD3<Double> {
     SIMD3<Double>(Double(value.x), Double(value.y), Double(value.z))
 }

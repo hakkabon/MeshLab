@@ -120,6 +120,7 @@ public struct ThermalAnalysis: Sendable {
         var kinematics: [ElementKinematics] = []
         kinematics.reserveCapacity(mesh.elements.count)
         for elementIndex in mesh.elements.indices {
+            try Task.checkCancellation()
             let data = try ElementKinematics.compute(
                 mesh: mesh,
                 material: model.material,
@@ -199,6 +200,7 @@ public struct ThermalAnalysis: Sendable {
         var fluxes: [ElementHeatFlux] = []
         fluxes.reserveCapacity(kinematics.count)
         for data in kinematics {
+            try Task.checkCancellation()
             var gradient = SIMD3<Double>.zero
             for (node, shapeGradient) in zip(data.nodeIndices, data.shapeGradients) {
                 gradient += shapeGradient * temperatures[node]

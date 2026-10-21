@@ -82,6 +82,7 @@ struct MatrixFreeConjugateGradient {
         var relativeResidual = 1.0
 
         for iteration in 1...options.maximumIterations {
+            try Task.checkCancellation()
             let fullDirection = expand(
                 direction,
                 freeDOFs: freeDOFs,

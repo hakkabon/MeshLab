@@ -119,23 +119,10 @@ public struct ElementKinematics: Sendable {
         localDisplacement: [Double],
         initialStrain: [Double] = []
     ) -> [Double] {
-        precondition(localDisplacement.count == dofCount, "Local displacement size mismatch")
-        precondition(
-            initialStrain.isEmpty || initialStrain.count == strainCount,
-            "Initial strain size mismatch"
+        let strain = elasticStrain(
+            localDisplacement: localDisplacement,
+            initialStrain: initialStrain
         )
-
-        var strain = [Double](repeating: 0, count: strainCount)
-        for row in 0..<strainCount {
-            var sum = 0.0
-            for column in 0..<dofCount {
-                sum += bMatrix[row * dofCount + column] * localDisplacement[column]
-            }
-            strain[row] = sum
-            if !initialStrain.isEmpty {
-                strain[row] -= initialStrain[row]
-            }
-        }
 
         var inPlane = [Double](repeating: 0, count: strainCount)
         for row in 0..<strainCount {
@@ -158,6 +145,52 @@ public struct ElementKinematics: Sendable {
             0,
             0,
         ]
+    }
+
+    /// Elastic energy stored by this element after subtracting any initial
+    /// strain, before an optional material/stiffness multiplier is applied.
+    public func strainEnergy(
+        localDisplacement: [Double],
+        initialStrain: [Double] = []
+    ) -> Double {
+        let strain = elasticStrain(
+            localDisplacement: localDisplacement,
+            initialStrain: initialStrain
+        )
+        var quadratic = 0.0
+        for row in 0..<strainCount {
+            var stress = 0.0
+            for column in 0..<strainCount {
+                stress += constitutive[row * strainCount + column] * strain[column]
+            }
+            quadratic += strain[row] * stress
+        }
+        return 0.5 * measure * quadratic
+    }
+
+    private func elasticStrain(
+        localDisplacement: [Double],
+        initialStrain: [Double]
+    ) -> [Double] {
+        precondition(localDisplacement.count == dofCount, "Local displacement size mismatch")
+        precondition(
+            initialStrain.isEmpty || initialStrain.count == strainCount,
+            "Initial strain size mismatch"
+        )
+
+        var strain = [Double](repeating: 0, count: strainCount)
+        for row in 0..<strainCount {
+            var sum = 0.0
+            for column in 0..<dofCount {
+                sum += bMatrix[row * dofCount + column] * localDisplacement[column]
+            }
+            strain[row] = sum
+            if !initialStrain.isEmpty {
+                strain[row] -= initialStrain[row]
+            }
+        }
+
+        return strain
     }
 
     public static func vonMises(stress: [Double]) -> Double {
@@ -191,7 +224,10 @@ public struct ElementKinematics: Sendable {
         let jacobian = simd_double3x3(columns: (p1 - p0, p2 - p0, p3 - p0))
         let determinant = jacobian.determinant
         let volume = abs(determinant) / 6
-        guard determinant.isFinite, volume > 1e-15 else {
+        let edges = [p1 - p0, p2 - p0, p3 - p0, p2 - p1, p3 - p1, p3 - p2]
+        let scale = edges.map(simd_length).max() ?? 0
+        let quality = scale > 0 ? abs(determinant) / (scale * scale * scale) : 0
+        guard determinant.isFinite, volume > 0, quality > 1e-12 else {
             throw FEMError.degenerateElement(elementIndex)
         }
 
@@ -248,7 +284,14 @@ public struct ElementKinematics: Sendable {
         let twiceSignedArea = (p1.x - p0.x) * (p2.y - p0.y)
             - (p2.x - p0.x) * (p1.y - p0.y)
         let area = 0.5 * abs(twiceSignedArea)
-        guard twiceSignedArea.isFinite, area > 1e-15 else {
+        let firstLength = hypot(p1.x - p0.x, p1.y - p0.y)
+        let secondLength = hypot(p2.x - p0.x, p2.y - p0.y)
+        let thirdLength = hypot(p2.x - p1.x, p2.y - p1.y)
+        let edgeScale = max(firstLength, secondLength, thirdLength)
+        let quality = edgeScale > 0
+            ? abs(twiceSignedArea) / (edgeScale * edgeScale)
+            : 0
+        guard twiceSignedArea.isFinite, area > 0, quality > 1e-12 else {
             throw FEMError.degenerateElement(elementIndex)
         }
         let scale = 1 / twiceSignedArea

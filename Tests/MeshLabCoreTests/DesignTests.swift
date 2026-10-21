@@ -142,6 +142,24 @@ private func planarCantilever(
     #expect(sensitivity.volumeGradient[0].isFinite)
 }
 
+@Test func shapeSensitivityUsesOneSidedDifferenceAtBounds() throws {
+    let model = try planarCantilever()
+    let node = try #require(model.mesh.nodeIndices {
+        abs($0.x - 4) < 1e-12 && abs($0.y - 0.5) < 1e-12
+    }.first)
+    let sensitivity = try ShapeOptimization().sensitivity(
+        model,
+        variables: [ShapeDesignVariable(
+            node: node,
+            axis: 1,
+            lower: model.mesh.nodes[node].y,
+            upper: model.mesh.nodes[node].y + 0.2
+        )]
+    )
+    #expect(sensitivity.complianceGradient[0].isFinite)
+    #expect(sensitivity.volumeGradient[0].isFinite)
+}
+
 @Test func shapeOptimizationPreservesAValidVolume() throws {
     let model = try planarCantilever()
     var variables: [ShapeDesignVariable] = []

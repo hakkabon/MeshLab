@@ -147,6 +147,7 @@ public struct ShapeOptimization: Sendable {
         var final = initial
 
         for outer in 1...options.outerIterations {
+            try Task.checkCancellation()
             let previous = design
             let currentLambda = lambda
             let currentMu = mu
@@ -246,6 +247,7 @@ public struct ShapeOptimization: Sendable {
         design: [Double],
         needGradient: Bool
     ) throws -> Evaluation {
+        try Task.checkCancellation()
         let model = try modelWithDesign(base, variables: variables, design: design)
         let result = try StaticAnalysis(options: options.analysisOptions).solve(model)
         let compliance = 2 * result.strainEnergy
@@ -264,40 +266,51 @@ public struct ShapeOptimization: Sendable {
         let full = fullVector(result, dimension: model.mesh.dimension)
         var complianceGradient = [Double](repeating: 0, count: variables.count)
         var volumeGradient = [Double](repeating: 0, count: variables.count)
+        let currentStiffness = try FEMAssembly.assembleStiffness(model).matrix
+        let currentLoads = try FEMAssembly.loadVector(model)
         for index in variables.indices {
+            try Task.checkCancellation()
             let step = options.finiteDifferenceStep
                 * max(1, abs(design[index]))
+            let plusStep = min(step, max(0, variables[index].upper - design[index]))
+            let minusStep = min(step, max(0, design[index] - variables[index].lower))
+            let denominator = plusStep + minusStep
+            guard denominator > 0 else {
+                throw DesignError.invalidVariable(
+                    "Shape finite difference has no room inside the variable bounds"
+                )
+            }
             var plusDesign = design
             var minusDesign = design
-            plusDesign[index] += step
-            minusDesign[index] -= step
-            let plus = try modelWithDesign(
-                base,
-                variables: variables,
-                design: plusDesign
-            )
-            let minus = try modelWithDesign(
-                base,
-                variables: variables,
-                design: minusDesign
-            )
-            let plusStiffness = try FEMAssembly.assembleStiffness(plus).matrix
-            let minusStiffness = try FEMAssembly.assembleStiffness(minus).matrix
-            let plusLoads = try FEMAssembly.loadVector(plus)
-            let minusLoads = try FEMAssembly.loadVector(minus)
+            plusDesign[index] += plusStep
+            minusDesign[index] -= minusStep
+            let plus = plusStep > 0
+                ? try modelWithDesign(base, variables: variables, design: plusDesign)
+                : model
+            let minus = minusStep > 0
+                ? try modelWithDesign(base, variables: variables, design: minusDesign)
+                : model
+            let plusStiffness = plusStep > 0
+                ? try FEMAssembly.assembleStiffness(plus).matrix
+                : currentStiffness
+            let minusStiffness = minusStep > 0
+                ? try FEMAssembly.assembleStiffness(minus).matrix
+                : currentStiffness
+            let plusLoads = plusStep > 0 ? try FEMAssembly.loadVector(plus) : currentLoads
+            let minusLoads = minusStep > 0 ? try FEMAssembly.loadVector(minus) : currentLoads
             let plusProduct = plusStiffness.multiply(full)
             let minusProduct = minusStiffness.multiply(full)
             let dQuadratic = VectorMath.dot(
                 full,
                 zip(plusProduct, minusProduct).map { $0 - $1 }
-            ) / (2 * step)
+            ) / denominator
             let dLoad = VectorMath.dot(
                 full,
                 zip(plusLoads, minusLoads).map { $0 - $1 }
-            ) / (2 * step)
+            ) / denominator
             complianceGradient[index] = 2 * dLoad - dQuadratic
             volumeGradient[index] = (plus.mesh.measure - minus.mesh.measure)
-                / (2 * step)
+                / denominator
         }
         return Evaluation(
             model: model,

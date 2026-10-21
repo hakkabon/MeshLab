@@ -46,14 +46,20 @@ public final class FEMRenderer: NSObject, MTKViewDelegate {
     private let pipelineState: MTLRenderPipelineState
     private let depthStencilState: MTLDepthStencilState
     private let inFlight = DispatchSemaphore(value: 3)
+    private let fieldBufferCount = 3
 
     private var vertexBuffer: MTLBuffer?
     private var indexBuffer: MTLBuffer?
-    private var displacementBuffer: MTLBuffer?
-    private var stressBuffer: MTLBuffer?
+    private var displacementBuffers = [MTLBuffer?](repeating: nil, count: 3)
+    private var stressBuffers = [MTLBuffer?](repeating: nil, count: 3)
+    private var fieldFrame = 0
+    private var fieldDisplacements: [SIMD3<Float>] = []
+    private var fieldStress: [Float] = []
+    private var geometryPositions: [SIMD3<Float>] = []
+    private var geometryNormals: [SIMD3<Float>] = []
+    private var geometryIndices: [UInt32] = []
     private var vertexCount = 0
     private var indexCount = 0
-    private var lastRevision: Int?
     private var hasFramedScene = false
     private var stressRange: ClosedRange<Float> = 0...1
 
@@ -120,19 +126,17 @@ public final class FEMRenderer: NSObject, MTKViewDelegate {
         }
         guard !scene.isEmpty else {
             clear()
-            lastRevision = scene.revision
-            return
-        }
-        guard scene.revision != lastRevision || vertexBuffer == nil else {
             return
         }
 
         let positions = scene.surface.positions
         let indices = scene.surface.indices
 
-        if vertexBuffer == nil
-            || vertexCount != positions.count
-            || indexCount != indices.count {
+        let geometryChanged = vertexBuffer == nil
+            || geometryPositions != positions
+            || geometryNormals != scene.surface.normals
+            || geometryIndices != indices
+        if geometryChanged {
             let vertices = zip(positions, scene.surface.normals).map {
                 FEMVertex(position: $0, normal: $1)
             }
@@ -140,8 +144,9 @@ public final class FEMRenderer: NSObject, MTKViewDelegate {
             indexBuffer = try Self.makeBuffer(device: device, values: indices)
             vertexCount = positions.count
             indexCount = indices.count
-            displacementBuffer = nil
-            stressBuffer = nil
+            geometryPositions = positions
+            geometryNormals = scene.surface.normals
+            geometryIndices = indices
 
             if !hasFramedScene {
                 frameScene()
@@ -150,19 +155,19 @@ public final class FEMRenderer: NSObject, MTKViewDelegate {
         }
 
         try ensureFieldBuffers(count: vertexCount)
-        writeFields(
+        setFields(
             displacements: scene.displacements,
             stress: scene.stress,
             stressRange: scene.stressRange
         )
-        lastRevision = scene.revision
     }
 
     /// Updates only the per-vertex fields while reusing the shared buffers.
     ///
     /// Call this from a display or simulation loop when the mesh topology stays
-    /// fixed and only displacements/stress change. The CPU writes into the same
-    /// shared allocations Metal is reading, so no per-frame buffer creation is
+    /// fixed and only displacements/stress change. Values are staged in CPU
+    /// arrays and copied into a ring of shared Metal buffers at draw time, so an
+    /// in-flight frame is never overwritten and no per-frame allocation is
     /// required.
     public func updateFields(
         displacements: [SIMD3<Float>],
@@ -178,7 +183,7 @@ public final class FEMRenderer: NSObject, MTKViewDelegate {
             )
         }
         try ensureFieldBuffers(count: vertexCount)
-        writeFields(
+        setFields(
             displacements: displacements,
             stress: stress,
             stressRange: stressRange
@@ -197,11 +202,16 @@ public final class FEMRenderer: NSObject, MTKViewDelegate {
     public func clear() {
         vertexBuffer = nil
         indexBuffer = nil
-        displacementBuffer = nil
-        stressBuffer = nil
+        displacementBuffers = [MTLBuffer?](repeating: nil, count: fieldBufferCount)
+        stressBuffers = [MTLBuffer?](repeating: nil, count: fieldBufferCount)
+        fieldFrame = 0
+        fieldDisplacements = []
+        fieldStress = []
+        geometryPositions = []
+        geometryNormals = []
+        geometryIndices = []
         vertexCount = 0
         indexCount = 0
-        lastRevision = nil
         hasFramedScene = false
     }
 
@@ -257,6 +267,15 @@ public final class FEMRenderer: NSObject, MTKViewDelegate {
             inFlight.signal()
         }
 
+        let fieldIndex = fieldFrame % fieldBufferCount
+        guard let displacementBuffer = displacementBuffers[fieldIndex],
+              let stressBuffer = stressBuffers[fieldIndex] else {
+            inFlight.signal()
+            return
+        }
+        Self.write(values: fieldDisplacements, into: displacementBuffer)
+        Self.write(values: fieldStress, into: stressBuffer)
+
         guard let encoder = commandBuffer.makeRenderCommandEncoder(
             descriptor: renderPassDescriptor
         ) else {
@@ -267,8 +286,7 @@ public final class FEMRenderer: NSObject, MTKViewDelegate {
         encoder.setRenderPipelineState(pipelineState)
         encoder.setDepthStencilState(depthStencilState)
 
-        if let vertexBuffer, let indexBuffer,
-           let displacementBuffer, let stressBuffer, indexCount > 0 {
+        if let vertexBuffer, let indexBuffer, indexCount > 0 {
             let drawableSize = view.drawableSize
             let aspect = Float(drawableSize.width / max(drawableSize.height, 1))
             var uniforms = Uniforms(
@@ -310,6 +328,7 @@ public final class FEMRenderer: NSObject, MTKViewDelegate {
         encoder.endEncoding()
         commandBuffer.present(drawable)
         commandBuffer.commit()
+        fieldFrame = (fieldFrame + 1) % fieldBufferCount
     }
 
     private func ensureFieldBuffers(count: Int) throws {
@@ -317,33 +336,37 @@ public final class FEMRenderer: NSObject, MTKViewDelegate {
             count * MemoryLayout<SIMD3<Float>>.stride,
             MemoryLayout<SIMD3<Float>>.stride
         )
-        if displacementBuffer == nil || displacementBuffer!.length < displacementLength {
-            displacementBuffer = try Self.makeBuffer(
-                device: device,
-                byteCount: displacementLength
-            )
+        for index in 0..<fieldBufferCount {
+            if displacementBuffers[index] == nil
+                || displacementBuffers[index]!.length < displacementLength {
+                displacementBuffers[index] = try Self.makeBuffer(
+                    device: device,
+                    byteCount: displacementLength
+                )
+            }
         }
 
         let stressLength = max(
             count * MemoryLayout<Float>.stride,
             MemoryLayout<Float>.stride
         )
-        if stressBuffer == nil || stressBuffer!.length < stressLength {
-            stressBuffer = try Self.makeBuffer(device: device, byteCount: stressLength)
+        for index in 0..<fieldBufferCount {
+            if stressBuffers[index] == nil || stressBuffers[index]!.length < stressLength {
+                stressBuffers[index] = try Self.makeBuffer(
+                    device: device,
+                    byteCount: stressLength
+                )
+            }
         }
     }
 
-    private func writeFields(
+    private func setFields(
         displacements: [SIMD3<Float>],
         stress: [Float],
         stressRange: ClosedRange<Float>
     ) {
-        if let displacementBuffer {
-            Self.write(values: displacements, into: displacementBuffer)
-        }
-        if let stressBuffer {
-            Self.write(values: stress, into: stressBuffer)
-        }
+        fieldDisplacements = displacements
+        fieldStress = stress
         self.stressRange = stressRange
     }
 

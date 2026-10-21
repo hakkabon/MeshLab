@@ -75,6 +75,7 @@ private func thermalBar() throws -> (mesh: Mesh, material: ElasticMaterial) {
     #expect(abs(actual.y - expected.y) < 1e-12)
     #expect(abs(actual.z - expected.z) < 1e-12)
     #expect(result.staticResult.maxVonMises < 1e-3)
+    #expect(result.staticResult.strainEnergy < 1e-12)
 }
 
 @Test func fullyFixedThermalExpansionProducesUniformCompression() throws {
@@ -116,6 +117,9 @@ private func thermalBar() throws -> (mesh: Mesh, material: ElasticMaterial) {
         #expect(abs(stress.components[4]) < abs(expected) * 1e-8)
         #expect(abs(stress.components[5]) < abs(expected) * 1e-8)
     }
+    let expectedEnergy = 0.5 * 3 * material.thermalExpansion * change
+        * abs(expected) * mesh.measure
+    #expect(abs(result.staticResult.strainEnergy - expectedEnergy) / expectedEnergy < 1e-8)
 }
 
 @Test func thermalAnalysisRejectsMissingConductivity() throws {

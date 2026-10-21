@@ -189,9 +189,14 @@ final class WorkbenchModel: ObservableObject {
 
         solveTask = Task { [weak self] in
             do {
-                let outcome = try await Task.detached(priority: .userInitiated) {
+                let worker = Task.detached(priority: .userInitiated) {
                     try Self.run(project)
-                }.value
+                }
+                let outcome = try await withTaskCancellationHandler {
+                    try await worker.value
+                } onCancel: {
+                    worker.cancel()
+                }
                 guard !Task.isCancelled, let self, self.solveGeneration == generation else {
                     return
                 }
@@ -229,9 +234,14 @@ final class WorkbenchModel: ObservableObject {
 
         designTask = Task { [weak self] in
             do {
-                let outcome = try await Task.detached(priority: .userInitiated) {
+                let worker = Task.detached(priority: .userInitiated) {
                     try project.designStudy.run(on: project)
-                }.value
+                }
+                let outcome = try await withTaskCancellationHandler {
+                    try await worker.value
+                } onCancel: {
+                    worker.cancel()
+                }
                 guard !Task.isCancelled,
                       let self,
                       self.designGeneration == generation else {

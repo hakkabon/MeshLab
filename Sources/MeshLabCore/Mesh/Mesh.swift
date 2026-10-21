@@ -53,6 +53,9 @@ public enum MeshError: Error, Equatable, Sendable {
     case mixedDimensions
     case degenerateElement(Int)
     case emptySurface
+    case invalidSurfaceVertexCount
+    case invalidSurfaceIndex(UInt32)
+    case invalidSurfaceNode(Int)
 }
 
 public struct Mesh: Sendable, Codable, Equatable {
@@ -85,7 +88,9 @@ public struct Mesh: Sendable, Codable, Equatable {
                     throw MeshError.nodeIndexOutOfRange(element: elementIndex, node: node)
                 }
             }
-            guard try Self.elementMeasure(type: element.type, coordinates: element.nodes.map { nodes[$0] }) > 1e-15 else {
+            let coordinates = element.nodes.map { nodes[$0] }
+            guard try Self.elementMeasure(type: element.type, coordinates: coordinates) > 0,
+                  Self.elementQuality(type: element.type, coordinates: coordinates) > 1e-12 else {
                 throw MeshError.degenerateElement(elementIndex)
             }
         }
@@ -254,6 +259,39 @@ public struct Mesh: Sendable, Codable, Equatable {
             return 0.5 * abs(a.x * b.y - a.y * b.x)
         }
     }
+
+    private static func elementQuality(
+        type: ElementType,
+        coordinates: [SIMD3<Double>]
+    ) -> Double {
+        switch type {
+        case .tetrahedron4:
+            let edges = [
+                coordinates[1] - coordinates[0],
+                coordinates[2] - coordinates[0],
+                coordinates[3] - coordinates[0],
+                coordinates[2] - coordinates[1],
+                coordinates[3] - coordinates[1],
+                coordinates[3] - coordinates[2],
+            ]
+            let scale = edges.map(simd_length).max() ?? 0
+            guard scale.isFinite, scale > 0 else { return 0 }
+            let determinant = abs(simd_dot(edges[0], simd_cross(edges[1], edges[2])))
+            return determinant / (scale * scale * scale)
+        case .triangle3:
+            let first = coordinates[1] - coordinates[0]
+            let second = coordinates[2] - coordinates[0]
+            let third = coordinates[2] - coordinates[1]
+            let scale = max(
+                hypot(first.x, first.y),
+                hypot(second.x, second.y),
+                hypot(third.x, third.y)
+            )
+            guard scale.isFinite, scale > 0 else { return 0 }
+            let twiceArea = abs(first.x * second.y - first.y * second.x)
+            return twiceArea / (scale * scale)
+        }
+    }
 }
 
 extension Mesh {
@@ -290,6 +328,18 @@ public struct SurfaceMesh: Sendable {
     ) throws {
         guard !faces.isEmpty else {
             throw MeshError.emptySurface
+        }
+
+        for face in faces {
+            guard face.count == 3 else {
+                throw MeshError.invalidSurfaceVertexCount
+            }
+            if let invalid = face.first(where: { !nodes.indices.contains($0) }) {
+                throw MeshError.invalidSurfaceNode(invalid)
+            }
+        }
+        guard nodes.allSatisfy({ $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }) else {
+            throw MeshError.invalidSurfaceVertexCount
         }
 
         var usedNodes = Set<Int>()
@@ -361,7 +411,22 @@ public struct SurfaceMesh: Sendable {
         normals: [SIMD3<Float>],
         indices: [UInt32],
         sourceNodes: [Int]
-    ) {
+    ) throws {
+        guard positions.count == normals.count,
+              positions.count == sourceNodes.count,
+              indices.count.isMultiple(of: 3) else {
+            throw MeshError.invalidSurfaceVertexCount
+        }
+        guard positions.allSatisfy({ $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }),
+              normals.allSatisfy({ $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }) else {
+            throw MeshError.invalidSurfaceVertexCount
+        }
+        if let invalid = sourceNodes.first(where: { $0 < 0 }) {
+            throw MeshError.invalidSurfaceNode(invalid)
+        }
+        if let invalid = indices.first(where: { Int($0) >= positions.count }) {
+            throw MeshError.invalidSurfaceIndex(invalid)
+        }
         self.positions = positions
         self.normals = normals
         self.indices = indices

@@ -136,6 +136,7 @@ public struct TopologyOptimization: Sendable {
         var lastEvaluation = initial
 
         for outer in 1...options.outerIterations {
+            try Task.checkCancellation()
             let previous = design
             let currentLambda = lambda
             let currentMu = mu
@@ -241,6 +242,7 @@ public struct TopologyOptimization: Sendable {
         volumes: [Double],
         neighbors: [[(index: Int, weight: Double)]]
     ) throws -> Evaluation {
+        try Task.checkCancellation()
         var model = base
         model.elementStiffnessScales = densities.map { scale(for: $0) }
         let sensitivity = try ComplianceAdjoint.solve(
