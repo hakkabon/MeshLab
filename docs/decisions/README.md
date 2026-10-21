@@ -10,6 +10,7 @@ relationship to the NumericCore ecosystem.
 | [0003](0003-sparse-solver-facade.md) | Accepted | Keep `SparseSolver` as the public facade over reusable NumericCoreSparse LU/LDLT factorizations, with explicit settings and diagnostics. |
 | [0004](0004-product-workflow-and-project-format.md) | Accepted | Use versioned JSON projects, off-main-actor solves, CPU surface picking, and a legend that mirrors the Metal palette. |
 | [0005](0005-dynamics-and-thermal-coupling.md) | Accepted | Add 3D consistent mass, modal/transient dynamics, steady thermal analysis, one-way thermal strain, and project schema v2. |
+| [0006](0006-design-loop.md) | Accepted | Add parametric sweeps, self-adjoint compliance sensitivities, SIMP topology optimization, discrete shape optimization, and project schema v3. |
 
 When a decision changes, add a new ADR that supersedes the old one rather than
 silently rewriting history.

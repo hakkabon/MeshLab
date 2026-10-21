@@ -25,6 +25,12 @@ final class WorkbenchModel: ObservableObject {
         didSet {
             if !project.hasSameAnalysis(as: oldValue) {
                 needsSolve = true
+                clearDesign()
+                cancelDesign()
+            }
+            if project.designStudy != oldValue.designStudy {
+                clearDesign()
+                cancelDesign()
             }
             if project.analysis == .modal,
                project.selectedMode != oldValue.selectedMode {
@@ -36,15 +42,22 @@ final class WorkbenchModel: ObservableObject {
     @Published private(set) var modalResult: ModalResult?
     @Published private(set) var thermalResult: ThermalResult?
     @Published private(set) var scene: RenderScene?
+    @Published private(set) var designResult: DesignRunResult?
     @Published private(set) var isSolving = false
+    @Published private(set) var isDesigning = false
+    @Published private(set) var lastDesignSeconds: Double?
     @Published private(set) var needsSolve = true
     @Published private(set) var selection: SurfacePick?
     @Published private(set) var lastSolveSeconds: Double?
     @Published var errorMessage: String?
 
     private var solveTask: Task<Void, Never>?
+    private var designTask: Task<Void, Never>?
     private var solveGeneration = 0
+    private var designGeneration = 0
     private var revision = 0
+    private var designMesh: Mesh?
+    private var designStaticResult: StaticResult?
 
     init() {
         do {
@@ -57,13 +70,19 @@ final class WorkbenchModel: ObservableObject {
 
     deinit {
         solveTask?.cancel()
+        designTask?.cancel()
     }
 
     var renderOptions: RenderOptions {
         RenderOptions(
-            showStress: project.analysis != .modal && project.showStress,
+            showStress: (project.analysis != .modal || designStaticResult != nil)
+                && project.showStress,
             deformationScale: project.deformationScale
         )
+    }
+
+    var displayMesh: Mesh {
+        designMesh ?? project.mesh
     }
 
     var solverPreset: SolverPreset {
@@ -82,13 +101,26 @@ final class WorkbenchModel: ObservableObject {
     var inspection: NodeInspection? {
         guard let selection else { return nil }
         let node = selection.sourceNode
-        guard project.mesh.nodes.indices.contains(node) else { return nil }
+        guard displayMesh.nodes.indices.contains(node) else { return nil }
 
+        if let designStaticResult,
+           designStaticResult.displacements.indices.contains(node),
+           designStaticResult.nodalVonMises.indices.contains(node) {
+            return NodeInspection(
+                node: node,
+                surfaceVertex: selection.surfaceVertex,
+                position: displayMesh.nodes[node],
+                displacement: designStaticResult.displacements[node],
+                vonMises: designStaticResult.nodalVonMises[node],
+                temperature: nil,
+                modeFrequency: nil
+            )
+        }
         if let mode = selectedMode, mode.displacements.indices.contains(node) {
             return NodeInspection(
                 node: node,
                 surfaceVertex: selection.surfaceVertex,
-                position: project.mesh.nodes[node],
+                position: displayMesh.nodes[node],
                 displacement: mode.displacements[node],
                 vonMises: nil,
                 temperature: nil,
@@ -103,7 +135,7 @@ final class WorkbenchModel: ObservableObject {
         return NodeInspection(
             node: node,
             surfaceVertex: selection.surfaceVertex,
-            position: project.mesh.nodes[node],
+            position: displayMesh.nodes[node],
             displacement: result.displacements[node],
             vonMises: result.nodalVonMises[node],
             temperature: thermalResult?.temperatures.indices.contains(node) == true
@@ -148,6 +180,7 @@ final class WorkbenchModel: ObservableObject {
     func solve() {
         solveTask?.cancel()
         solveGeneration += 1
+        clearDesign()
         let generation = solveGeneration
         let project = self.project
         let started = Date()
@@ -170,6 +203,48 @@ final class WorkbenchModel: ObservableObject {
                 guard let self, self.solveGeneration == generation else { return }
                 self.isSolving = false
                 self.errorMessage = Self.describe(error)
+            }
+        }
+    }
+
+    func runDesign() {
+        if project.designStudy.kind == .parametric,
+           project.designStudy.parametric.axes.isEmpty {
+            let modulus = project.material.youngModulus
+            project.designStudy.parametric = ParametricStudy(axes: [
+                ParametricAxis(
+                    parameter: .youngModulus,
+                    values: [0.5 * modulus, modulus, 1.5 * modulus]
+                ),
+                ParametricAxis(parameter: .loadScale, values: [0.5, 1, 1.5]),
+            ])
+        }
+        designTask?.cancel()
+        designGeneration += 1
+        let generation = designGeneration
+        let project = self.project
+        let started = Date()
+        isDesigning = true
+        errorMessage = nil
+
+        designTask = Task { [weak self] in
+            do {
+                let outcome = try await Task.detached(priority: .userInitiated) {
+                    try project.designStudy.run(on: project)
+                }.value
+                guard !Task.isCancelled,
+                      let self,
+                      self.designGeneration == generation else {
+                    return
+                }
+                self.applyDesign(outcome, elapsed: Date().timeIntervalSince(started))
+            } catch is CancellationError {
+                guard let self, self.designGeneration == generation else { return }
+                self.isDesigning = false
+            } catch {
+                guard let self, self.designGeneration == generation else { return }
+                self.isDesigning = false
+                self.errorMessage = "Design study failed: \(Self.describe(error))"
             }
         }
     }
@@ -281,6 +356,56 @@ final class WorkbenchModel: ObservableObject {
         project.loadScale = value
     }
 
+    func setDesignKind(_ kind: DesignStudyKind) {
+        guard project.designStudy.kind != kind else { return }
+        project.designStudy.kind = kind
+        if kind == .shape {
+            let lastAxis = max(project.mesh.dimension - 1, 0)
+            project.designStudy.shape.selectionAxis = min(
+                project.designStudy.shape.selectionAxis,
+                lastAxis
+            )
+            project.designStudy.shape.motionAxis = min(
+                project.designStudy.shape.motionAxis,
+                lastAxis
+            )
+        }
+    }
+
+    func setTopologyVolumeFraction(_ value: Double) {
+        project.designStudy.topology.volumeFraction = min(max(value, 0.05), 0.95)
+    }
+
+    func setTopologyOuterIterations(_ count: Int) {
+        project.designStudy.topology.outerIterations = min(max(count, 1), 12)
+    }
+
+    func setTopologyInnerIterations(_ count: Int) {
+        project.designStudy.topology.innerIterations = min(max(count, 1), 100)
+    }
+
+    func setShapeSelectionAxis(_ axis: Int) {
+        let lastAxis = max(project.mesh.dimension - 1, 0)
+        project.designStudy.shape.selectionAxis = min(max(axis, 0), lastAxis)
+    }
+
+    func setShapeMotionAxis(_ axis: Int) {
+        let lastAxis = max(project.mesh.dimension - 1, 0)
+        project.designStudy.shape.motionAxis = min(max(axis, 0), lastAxis)
+    }
+
+    func setShapeMargin(_ margin: Double) {
+        project.designStudy.shape.margin = min(max(margin, 0.01), 1)
+    }
+
+    func setShapeOuterIterations(_ count: Int) {
+        project.designStudy.shape.outerIterations = min(max(count, 1), 12)
+    }
+
+    func setShapeInnerIterations(_ count: Int) {
+        project.designStudy.shape.innerIterations = min(max(count, 1), 100)
+    }
+
     func setShowStress(_ show: Bool) {
         project.showStress = show
     }
@@ -385,6 +510,66 @@ final class WorkbenchModel: ObservableObject {
         )
     }
 
+    private func applyDesign(_ outcome: DesignRunResult, elapsed: Double) {
+        do {
+            designResult = outcome
+            designStaticResult = nil
+            designMesh = nil
+            revision += 1
+
+            switch outcome {
+            case .parametric(let parametric):
+                let surface = try parametric.bestModel.mesh.makeSurfaceMesh()
+                designMesh = parametric.bestModel.mesh
+                designStaticResult = parametric.bestResult
+                scene = RenderScene(
+                    surface: surface,
+                    result: parametric.bestResult,
+                    revision: revision
+                )
+            case .topology(let topology):
+                let surface = try project.mesh.makeSurfaceMesh()
+                designMesh = project.mesh
+                designStaticResult = topology.finalResult
+                scene = RenderScene(
+                    surface: surface,
+                    result: topology.finalResult,
+                    revision: revision
+                )
+            case .shape(let shape):
+                let surface = try shape.mesh.makeSurfaceMesh()
+                designMesh = shape.mesh
+                designStaticResult = shape.staticResult
+                scene = RenderScene(
+                    surface: surface,
+                    result: shape.staticResult,
+                    revision: revision
+                )
+            }
+
+            lastDesignSeconds = elapsed
+            selection = nil
+            isDesigning = false
+        } catch {
+            isDesigning = false
+            errorMessage = "Could not prepare the design scene: \(Self.describe(error))"
+        }
+    }
+
+    private func clearDesign() {
+        designResult = nil
+        designStaticResult = nil
+        designMesh = nil
+        lastDesignSeconds = nil
+    }
+
+    private func cancelDesign() {
+        designTask?.cancel()
+        designTask = nil
+        designGeneration += 1
+        isDesigning = false
+    }
+
     private func clearResults() {
         result = nil
         modalResult = nil
@@ -392,6 +577,7 @@ final class WorkbenchModel: ObservableObject {
         scene = nil
         selection = nil
         needsSolve = true
+        clearDesign()
     }
 
     nonisolated private static func run(_ project: MeshLabProject) throws -> SolveOutcome {

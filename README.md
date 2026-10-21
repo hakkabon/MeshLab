@@ -5,9 +5,10 @@ in progress. It combines Swift geometry and 3D element assembly with the
 NumericCore numerical stack and a real-time Metal renderer.
 
 It provides linear-elastic static, modal, transient, and steady thermal
-analysis of tetrahedral and triangular meshes, stress recovery, an interactive
-Metal viewport, and a SwiftUI product slice for opening, solving, inspecting,
-and exporting projects on macOS and iOS.
+analysis of tetrahedral and triangular meshes, stress recovery, compliance
+design studies, an interactive Metal viewport, and a SwiftUI product slice for
+opening, solving, optimizing, inspecting, and exporting projects on macOS and
+iOS.
 
 ## Status
 
@@ -55,19 +56,33 @@ steady thermal-structural analysis:
 - the workbench can switch between static, modal, and thermal-structural
   studies, inspect mode shapes, and export analysis-specific CSV fields.
 
-The package has 46 tests covering vector/dense/sparse math, mesh topology and
+P4 (Design loop) is complete:
+
+- parametric sweeps of Young's modulus, Poisson ratio, thickness, and load
+  scale, validated against static solves;
+- self-adjoint compliance sensitivities for element stiffness, material, and
+  load scaling;
+- SIMP topology optimization with a volume equality constraint, sensitivity
+  filtering, and NumericCore L-BFGS-B;
+- discrete node-motion shape optimization with a volume constraint;
+- project schema v3 with parametric, topology, and shape study settings, plus
+  v1/v2 migration;
+- asynchronous design studies in the workbench with result summaries and
+  best-sample, topology, and shape field rendering.
+
+The package has 56 tests covering vector/dense/sparse math, mesh topology and
 surface extraction, linear-static FEM equilibrium, solver backends and
 factorization reuse, modal/transient dynamics, thermal conduction and thermal
-stress, project files and schema migration, CSV export, camera math,
-render-scene mapping, stress palettes, surface picking, and Metal pipeline
-creation.
+stress, parametric sweeps, compliance adjoints, topology/shape optimization,
+project files and schema migration, CSV export, camera math, render-scene
+mapping, stress palettes, surface picking, and Metal pipeline creation.
 
 ## Architecture
 
 ```
                   +----------------------+
                   | MeshLabApp (SwiftUI) |  project workflow, picking,
-                  |                      |  colorbar, async solve
+                  |                      |  colorbar, async solve/design
                   +----------+-----------+
                              |
                   +----------v-----------+
@@ -76,7 +91,7 @@ creation.
                              |
                   +----------v-----------+
                   |  MeshLabCore         |  geometry, 3D elements, assembly,
-                  |                      |  boundary conditions, results
+                  |                      |  design studies, results
                   +----------+-----------+
                              |
               +--------------+---------------+
@@ -92,19 +107,21 @@ creation.
 
 | Target | Responsibility |
 | --- | --- |
-| `MeshLabCore` | Mesh types, structured generators, material models, element kinematics, global assembly, Dirichlet/load handling, static/modal/transient/thermal analysis, result fields, solver facade. |
+| `MeshLabCore` | Mesh types, structured generators, material models, element kinematics, global assembly, Dirichlet/load handling, static/modal/transient/thermal analysis, design studies and sensitivities, result fields, solver facade. |
 | `MeshLabRender` | Surface extraction consumption, `RenderScene`, orbit camera, Metal pipeline, shared result buffers, `MTKView`/SwiftUI bridges. |
 | `MeshLab` | Umbrella re-export of Core and Render. |
-| `MeshLabApp` | SwiftUI workbench: project import/export, asynchronous solve, inspection, picking, and colorbar. |
+| `MeshLabApp` | SwiftUI workbench: project import/export, asynchronous solve and design studies, inspection, picking, and colorbar. |
 | `MeshLabBenchmarks` | Release-mode timing harness for mesh generation, assembly/solve, and render-scene construction. |
 
 ### Ownership boundary
 
-MeshLab owns geometry, meshing, 3D element formulations, assembly, rendering,
-and application UX. NumericCore owns reusable numerical algorithms, sparse
-factorization, iterative solvers, nonlinear methods, optimization, and its own
-2D/truss/continuum FEM models. The fixed-step structural Newmark path is
-currently a MeshLab adapter pending an upstream contribution (ADR 0005).
+MeshLab owns geometry, meshing, 3D element formulations, assembly, design-study
+formulations, rendering, and application UX. NumericCore owns reusable numerical
+algorithms, sparse factorization, iterative solvers, nonlinear methods,
+optimization, and its own 2D/truss/continuum FEM models. MeshLab's design
+studies adapt those kernels to its assembled models; the fixed-step structural
+Newmark path is likewise a MeshLab adapter pending an upstream contribution
+(ADR 0005).
 Rust-NumericCore stays behind Swift-NumericCore; MeshLab never imports the
 generated FFI bindings directly.
 
@@ -170,6 +187,11 @@ the environment it was captured on.
   heat-flux recovery.
 - One-way thermal-structural coupling with equivalent thermal loads and
   thermal-strain stress recovery.
+- Parametric static sweeps with Cartesian axes and objective-based best-sample
+  selection.
+- Self-adjoint compliance sensitivities and finite-difference-checked gradients.
+- SIMP topology optimization with volume control, filtering, and L-BFGS-B.
+- Discrete shape optimization of selected node coordinates with volume control.
 - Structured box and rectangle mesh generators.
 - Boundary surface extraction with outward face normals and source-node mapping.
 - Solver selection: Accelerate Cholesky/LDLT, NumericCore Cholesky/LU/LDLT,
@@ -183,8 +205,10 @@ the environment it was captured on.
 - SwiftUI app with a built-in cantilever example and editable material/loads.
 - Static, modal, and thermal-structural study selection with mode-shape
   inspection and thermal boundary summary.
+- Parametric, topology, and shape design studies with asynchronous runs,
+  summaries, and best-sample/optimized-field rendering.
 - Solver picker for Accelerate and NumericCore direct/iterative methods.
-- Versioned JSON project import/export (schema v2, v1 migration); static,
+- Versioned JSON project import/export (schema v3, v1/v2 migration); static,
   modal, and thermal CSV result export.
 - Asynchronous solve with progress, cancellation of stale results, and errors.
 - Surface picking resolves the deformed hit point to a source node.
@@ -217,7 +241,14 @@ the environment it was captured on.
   metrics, or adaptivity.
 - No document-based autosave or report generation yet.
 - Import is limited to MeshLab project JSON; OBJ/STL/CAD import is not
-  implemented. Project schema v2 files are not readable by older v1 clients.
+  implemented. Project schema v3 files are not readable by older clients.
+- Design optimization is limited to linear-static compliance with homogeneous
+  Dirichlet constraints and no thermal loading.
+- Topology optimization reports densities but does not render a density field;
+  shape optimization moves nodes on one selected face and has no
+  manufacturability constraints.
+- Design studies do not yet offer per-iteration progress or design-result CSV
+  export.
 - Rendering lacks clipping, vector glyphs, and time animation.
 - Picking is CPU ray casting and will need a spatial index or GPU picking for
   very large surfaces.
@@ -230,7 +261,7 @@ the environment it was captured on.
 
 ```
 Sources/
-  MeshLabCore/        math, mesh, static/dynamic/thermal FEM, project format
+  MeshLabCore/        math, mesh, static/dynamic/thermal FEM, design, project format
   MeshLabRender/      camera, renderer, SwiftUI bridges, MSL, picking, colorbar
   MeshLab/            umbrella module
   MeshLabApp/         SwiftUI workbench executable
@@ -259,8 +290,8 @@ Scripts/
   thermal, and one-way thermal-structural coupling.
 - **P3b — Nonlinear and higher-order:** nonlinear statics, `tet10`/`hex8`
   elements, shells, and beams.
-- **P4 — Design loop:** parametric studies, adjoint sensitivities, shape and
-  topology optimization.
+- **P4 — Design loop (complete):** parametric studies, adjoint sensitivities,
+  shape and topology optimization.
 - **P5 — Platform and scale:** GPU/matrix-free paths, cloud sweeps, visionOS,
   multiphysics coupling.
 

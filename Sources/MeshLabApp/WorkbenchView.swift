@@ -45,7 +45,7 @@ struct WorkbenchView: View {
                     Label("Solve", systemImage: "play.fill")
                 }
                 .keyboardShortcut("r", modifiers: .command)
-                .disabled(model.isSolving)
+                .disabled(model.isSolving || model.isDesigning)
             }
         }
         .fileImporter(
@@ -144,6 +144,165 @@ struct WorkbenchView: View {
                                 .max() ?? 0
                         )
                     )
+                }
+            }
+
+            Section("Design Study") {
+                Picker(
+                    "Study",
+                    selection: Binding(
+                        get: { model.project.designStudy.kind },
+                        set: { model.setDesignKind($0) }
+                    )
+                ) {
+                    ForEach(DesignStudyKind.allCases, id: \.self) { kind in
+                        Text(kind.title).tag(kind)
+                    }
+                }
+
+                switch model.project.designStudy.kind {
+                case .parametric:
+                    let study = model.project.designStudy.parametric
+                    if study.axes.isEmpty {
+                        Text("A default Young's modulus and load sweep is created when the study runs.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(Array(study.axes.enumerated()), id: \.offset) { _, axis in
+                            LabeledContent(axis.parameter.title) {
+                                Text(axis.values.map {
+                                    formatDesignValue($0, parameter: axis.parameter)
+                                }.joined(separator: ", "))
+                                .font(.caption.monospacedDigit())
+                                .multilineTextAlignment(.trailing)
+                            }
+                        }
+                        LabeledContent(
+                            "Samples",
+                            value: "\(parametricSampleCount)"
+                        )
+                    }
+                    LabeledContent("Objective", value: study.objective.title)
+
+                case .topology:
+                    LabeledContent(
+                        "Volume target",
+                        value: String(
+                            format: "%.0f%%",
+                            model.project.designStudy.topology.volumeFraction * 100
+                        )
+                    )
+                    Slider(
+                        value: Binding(
+                            get: {
+                                model.project.designStudy.topology.volumeFraction
+                            },
+                            set: { model.setTopologyVolumeFraction($0) }
+                        ),
+                        in: 0.1...0.9
+                    )
+                    Stepper(
+                        "Outer iterations: \(model.project.designStudy.topology.outerIterations)",
+                        value: Binding(
+                            get: {
+                                model.project.designStudy.topology.outerIterations
+                            },
+                            set: { model.setTopologyOuterIterations($0) }
+                        ),
+                        in: 1...12
+                    )
+                    Stepper(
+                        "Inner iterations: \(model.project.designStudy.topology.innerIterations)",
+                        value: Binding(
+                            get: {
+                                model.project.designStudy.topology.innerIterations
+                            },
+                            set: { model.setTopologyInnerIterations($0) }
+                        ),
+                        in: 1...100
+                    )
+
+                case .shape:
+                    Picker(
+                        "Selected face",
+                        selection: Binding(
+                            get: {
+                                model.project.designStudy.shape.selectionAxis
+                            },
+                            set: { model.setShapeSelectionAxis($0) }
+                        )
+                    ) {
+                        ForEach(0..<model.project.mesh.dimension, id: \.self) { axis in
+                            Text(axisName(axis)).tag(axis)
+                        }
+                    }
+                    Picker(
+                        "Motion axis",
+                        selection: Binding(
+                            get: {
+                                model.project.designStudy.shape.motionAxis
+                            },
+                            set: { model.setShapeMotionAxis($0) }
+                        )
+                    ) {
+                        ForEach(0..<model.project.mesh.dimension, id: \.self) { axis in
+                            Text(axisName(axis)).tag(axis)
+                        }
+                    }
+                    LabeledContent(
+                        "Margin",
+                        value: String(
+                            format: "±%.3g m",
+                            model.project.designStudy.shape.margin
+                        )
+                    )
+                    Slider(
+                        value: Binding(
+                            get: { model.project.designStudy.shape.margin },
+                            set: { model.setShapeMargin($0) }
+                        ),
+                        in: 0.01...0.5
+                    )
+                    Stepper(
+                        "Outer iterations: \(model.project.designStudy.shape.outerIterations)",
+                        value: Binding(
+                            get: {
+                                model.project.designStudy.shape.outerIterations
+                            },
+                            set: { model.setShapeOuterIterations($0) }
+                        ),
+                        in: 1...12
+                    )
+                    Stepper(
+                        "Inner iterations: \(model.project.designStudy.shape.innerIterations)",
+                        value: Binding(
+                            get: {
+                                model.project.designStudy.shape.innerIterations
+                            },
+                            set: { model.setShapeInnerIterations($0) }
+                        ),
+                        in: 1...100
+                    )
+                }
+
+                Button {
+                    model.runDesign()
+                } label: {
+                    Label("Run Design Study", systemImage: "wand.and.stars")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isSolving || model.isDesigning)
+
+                if model.isDesigning {
+                    HStack {
+                        ProgressView()
+                        Text("Optimizing…")
+                    }
+                }
+
+                if let designResult = model.designResult {
+                    designResultRows(designResult)
                 }
             }
 
@@ -361,6 +520,135 @@ struct WorkbenchView: View {
     }
 
     @ViewBuilder
+    private func designResultRows(_ outcome: DesignRunResult) -> some View {
+        switch outcome {
+        case .parametric(let result):
+            LabeledContent(
+                "Best sample",
+                value: "#\(result.bestIndex + 1) of \(result.samples.count)"
+            )
+            LabeledContent("Objective", value: result.objective.title)
+            if let best = result.best {
+                ForEach(Array(result.axes.enumerated()), id: \.offset) { index, axis in
+                    if best.values.indices.contains(index) {
+                        LabeledContent(
+                            axis.parameter.title,
+                            value: formatDesignValue(
+                                best.values[index],
+                                parameter: axis.parameter
+                            )
+                        )
+                    }
+                }
+                LabeledContent(
+                    "Best compliance",
+                    value: String(format: "%.4g J", best.compliance)
+                )
+                LabeledContent(
+                    "Peak displacement",
+                    value: String(format: "%.4g mm", best.maxDisplacement * 1_000)
+                )
+                LabeledContent(
+                    "Peak von Mises",
+                    value: String(format: "%.4g MPa", best.maxVonMises / 1e6)
+                )
+            }
+            designTimeRow
+
+        case .topology(let result):
+            LabeledContent(
+                "Final compliance",
+                value: String(format: "%.4g J", result.finalCompliance)
+            )
+            LabeledContent(
+                "Compliance change",
+                value: complianceChange(
+                    initial: result.initialCompliance,
+                    final: result.finalCompliance
+                )
+            )
+            LabeledContent(
+                "Volume",
+                value: String(format: "%.1f%%", result.volumeFraction * 100)
+            )
+            LabeledContent("Outer iterations", value: "\(result.iterations.count)")
+            LabeledContent(
+                "Last inner iterations",
+                value: "\(result.optimization.iterations)"
+            )
+            designTimeRow
+
+        case .shape(let result):
+            LabeledContent(
+                "Final compliance",
+                value: String(format: "%.4g J", result.finalCompliance)
+            )
+            LabeledContent(
+                "Compliance change",
+                value: complianceChange(
+                    initial: result.initialCompliance,
+                    final: result.finalCompliance
+                )
+            )
+            LabeledContent(
+                "Volume",
+                value: String(format: "%.1f%%", result.volumeFraction * 100)
+            )
+            LabeledContent("Variables", value: "\(result.variables.count)")
+            LabeledContent("Outer iterations", value: "\(result.iterations.count)")
+            LabeledContent(
+                "Last inner iterations",
+                value: "\(result.optimization.iterations)"
+            )
+            designTimeRow
+        }
+    }
+
+    private var designTimeRow: some View {
+        LabeledContent(
+            "Design time",
+            value: model.lastDesignSeconds.map {
+                String(format: "%.2f s", $0)
+            } ?? "—"
+        )
+    }
+
+    private func complianceChange(initial: Double, final: Double) -> String {
+        guard initial > 0 else { return "—" }
+        return String(format: "%+.1f%%", (final / initial - 1) * 100)
+    }
+
+    private func formatDesignValue(
+        _ value: Double,
+        parameter: DesignParameter
+    ) -> String {
+        switch parameter {
+        case .youngModulus:
+            return String(format: "%.4g GPa", value / 1e9)
+        case .poissonRatio:
+            return String(format: "%.4g", value)
+        case .thickness:
+            return String(format: "%.4g m", value)
+        case .loadScale:
+            return String(format: "%.4g×", value)
+        }
+    }
+
+    private var parametricSampleCount: Int {
+        model.project.designStudy.parametric.axes.reduce(1) {
+            $0 * max($1.values.count, 1)
+        }
+    }
+
+    private func axisName(_ axis: Int) -> String {
+        switch axis {
+        case 0: return "X"
+        case 1: return "Y"
+        default: return "Z"
+        }
+    }
+
+    @ViewBuilder
     private func staticResultRows(_ result: StaticResult) -> some View {
         LabeledContent(
             "Max displacement",
@@ -403,6 +691,10 @@ struct WorkbenchView: View {
 
             if model.isSolving {
                 ProgressView("Solving \(model.project.name)…")
+                    .padding(18)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            } else if model.isDesigning {
+                ProgressView("Optimizing \(model.project.name)…")
                     .padding(18)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             }
@@ -467,7 +759,7 @@ struct WorkbenchView: View {
                 model.solve()
             }
             .buttonStyle(.borderedProminent)
-            .disabled(model.isSolving)
+            .disabled(model.isSolving || model.isDesigning)
         }
         .padding(30)
         .frame(maxWidth: 420)
@@ -563,6 +855,37 @@ struct WorkbenchView: View {
     }
 }
 
+
+private extension DesignStudyKind {
+    var title: String {
+        switch self {
+        case .parametric: return "Parametric sweep"
+        case .topology: return "Topology optimization"
+        case .shape: return "Shape optimization"
+        }
+    }
+}
+
+private extension DesignParameter {
+    var title: String {
+        switch self {
+        case .youngModulus: return "Young's modulus"
+        case .poissonRatio: return "Poisson ratio"
+        case .thickness: return "Thickness"
+        case .loadScale: return "Load scale"
+        }
+    }
+}
+
+private extension ParametricObjective {
+    var title: String {
+        switch self {
+        case .compliance: return "Minimize compliance"
+        case .maxDisplacement: return "Minimize displacement"
+        case .maxVonMises: return "Minimize stress"
+        }
+    }
+}
 
 private extension AnalysisKind {
     var title: String {

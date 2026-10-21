@@ -29,6 +29,7 @@ let package = Package(
             dependencies: [
                 .product(name: "NumericCore", package: "Swift-NumericCore"),
                 .product(name: "NumericCoreSparse", package: "Swift-NumericCore"),
+                .product(name: "NumericCoreOptimization", package: "Swift-NumericCore"),
             ],
             linkerSettings: [
                 .linkedFramework("Accelerate"),

@@ -337,27 +337,9 @@ public struct TransientAnalysis: Sendable {
         var forces: [[Double]] = []
         forces.reserveCapacity(loadHistory.count)
         for loads in loadHistory {
-            var full = [Double](repeating: 0, count: model.mesh.dofCount)
             var loadModel = model
             loadModel.loads = loads
-            try FEMAssembly.applyLoads(
-                loadModel,
-                dimension: dimension,
-                into: &full
-            )
-            if model.bodyForce != .zero, model.material.density > 0 {
-                for data in assembled.kinematics {
-                    let element = model.mesh.elements[data.elementIndex]
-                    let nodeForce = model.material.density * data.measure
-                        / Double(element.nodes.count)
-                    for node in element.nodes {
-                        for axis in 0..<dimension {
-                            full[node * dimension + axis] += nodeForce
-                                * model.bodyForce[axis]
-                        }
-                    }
-                }
-            }
+            let full = try FEMAssembly.loadVector(loadModel)
             forces.append(FEMAssembly.reduced(full, freeDOFs: free))
         }
 

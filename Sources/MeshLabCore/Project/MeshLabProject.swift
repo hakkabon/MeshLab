@@ -35,7 +35,7 @@ public struct ThermalStudy: Sendable, Hashable, Codable {
 /// The project owns the mesh and analysis definition. Display settings travel
 /// with the document so reopening a project restores the same review state.
 public struct MeshLabProject: Sendable, Equatable, Codable {
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 3
 
     public var schemaVersion: Int
     public var name: String
@@ -53,6 +53,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
     public var modalModeCount: Int
     public var selectedMode: Int
     public var thermalStudy: ThermalStudy
+    public var designStudy: DesignStudy
 
     public init(
         name: String = "Untitled",
@@ -69,7 +70,8 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         analysis: AnalysisKind = .staticAnalysis,
         modalModeCount: Int = 6,
         selectedMode: Int = 0,
-        thermalStudy: ThermalStudy = ThermalStudy()
+        thermalStudy: ThermalStudy = ThermalStudy(),
+        designStudy: DesignStudy = DesignStudy()
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.name = name
@@ -87,6 +89,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         self.modalModeCount = modalModeCount
         self.selectedMode = selectedMode
         self.thermalStudy = thermalStudy
+        self.designStudy = designStudy
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -106,6 +109,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         case modalModeCount
         case selectedMode
         case thermalStudy
+        case designStudy
     }
 
     public init(from decoder: Decoder) throws {
@@ -142,6 +146,10 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
             ThermalStudy.self,
             forKey: .thermalStudy
         ) ?? ThermalStudy()
+        self.designStudy = try container.decodeIfPresent(
+            DesignStudy.self,
+            forKey: .designStudy
+        ) ?? DesignStudy()
     }
 
     public func makeModel() -> FEMModel {
@@ -213,6 +221,19 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
             thermalStudy: ThermalStudy(
                 constraints: thermalConstraints,
                 referenceTemperature: 20
+            ),
+            designStudy: DesignStudy(
+                kind: .parametric,
+                parametric: ParametricStudy(axes: [
+                    ParametricAxis(
+                        parameter: .youngModulus,
+                        values: [100e9, 200e9, 300e9]
+                    ),
+                    ParametricAxis(
+                        parameter: .loadScale,
+                        values: [0.5, 1, 1.5]
+                    ),
+                ])
             )
         )
     }

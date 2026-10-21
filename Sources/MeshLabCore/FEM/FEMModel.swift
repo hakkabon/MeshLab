@@ -45,6 +45,10 @@ public struct FEMModel: Sendable {
     /// thermal load and subtracts the free thermal strain during stress
     /// recovery. Thermal stress coupling currently requires a 3D mesh.
     public var temperatureChange: [Double]
+    /// Optional per-element stiffness multipliers. Empty means every element
+    /// uses its full material stiffness. Topology optimization supplies
+    /// SIMP-scaled values here; mass and thermal properties are unchanged.
+    public var elementStiffnessScales: [Double]
 
     public init(
         mesh: Mesh,
@@ -52,7 +56,8 @@ public struct FEMModel: Sendable {
         constraints: [DirichletCondition],
         loads: [Load] = [],
         bodyForce: SIMD3<Double> = .zero,
-        temperatureChange: [Double] = []
+        temperatureChange: [Double] = [],
+        elementStiffnessScales: [Double] = []
     ) {
         self.mesh = mesh
         self.material = material
@@ -60,6 +65,26 @@ public struct FEMModel: Sendable {
         self.loads = loads
         self.bodyForce = bodyForce
         self.temperatureChange = temperatureChange
+        self.elementStiffnessScales = elementStiffnessScales
+    }
+
+    public func stiffnessScale(forElement index: Int) throws -> Double {
+        guard mesh.elements.indices.contains(index) else {
+            throw FEMError.invalidModel("Element stiffness scale index is out of range")
+        }
+        guard !elementStiffnessScales.isEmpty else { return 1 }
+        guard elementStiffnessScales.count == mesh.elements.count else {
+            throw FEMError.invalidModel(
+                "Element stiffness scales must provide one value per element"
+            )
+        }
+        let scale = elementStiffnessScales[index]
+        guard scale.isFinite, scale >= 0 else {
+            throw FEMError.invalidModel(
+                "Element stiffness scales must be finite and non-negative"
+            )
+        }
+        return scale
     }
 
     public func globalDOF(node: Int, axis: Int) -> Int {
@@ -136,12 +161,7 @@ public struct StaticAnalysis: Sendable {
             dimension: dimension
         )
 
-        var rightHandSide = [Double](repeating: 0, count: mesh.dofCount)
-        try FEMAssembly.applyLoads(
-            model,
-            dimension: dimension,
-            into: &rightHandSide
-        )
+        let externalLoads = try FEMAssembly.loadVector(model)
 
         var triplets: [SparseTriplet] = []
         triplets.reserveCapacity(mesh.elements.count * 64)
@@ -157,22 +177,13 @@ public struct StaticAnalysis: Sendable {
             )
             kinematics.append(data)
 
-            if model.bodyForce != .zero, model.material.density > 0 {
-                let element = mesh.elements[elementIndex]
-                let nodeForce = model.material.density * data.measure / Double(element.nodes.count)
-                for node in element.nodes {
-                    for axis in 0..<dimension {
-                        rightHandSide[node * dimension + axis] += nodeForce * model.bodyForce[axis]
-                    }
-                }
-            }
-
             let stiffness = data.stiffness()
+            let scale = try model.stiffnessScale(forElement: elementIndex)
             let localDOFs = model.elementDOFs(elementIndex)
             let size = data.dofCount
             for row in 0..<size {
                 for column in 0...row {
-                    let value = stiffness[row * size + column]
+                    let value = stiffness[row * size + column] * scale
                     guard value != 0 else { continue }
                     triplets.append(SparseTriplet(
                         row: localDOFs[row],
@@ -187,6 +198,7 @@ public struct StaticAnalysis: Sendable {
             model,
             kinematics: kinematics
         )
+        var rightHandSide = externalLoads
         for dof in rightHandSide.indices {
             rightHandSide[dof] += thermal.loads[dof]
         }

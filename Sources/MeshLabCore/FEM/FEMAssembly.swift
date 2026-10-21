@@ -102,6 +102,46 @@ enum FEMAssembly {
         }
     }
 
+    /// Builds the full external load vector, including body forces. The
+    /// returned vector is not reduced for Dirichlet constraints.
+    static func loadVector(_ model: FEMModel) throws -> [Double] {
+        var rightHandSide = [Double](repeating: 0, count: model.mesh.dofCount)
+        try applyLoads(
+            model,
+            dimension: model.mesh.dimension,
+            into: &rightHandSide
+        )
+        guard model.bodyForce.x.isFinite,
+              model.bodyForce.y.isFinite,
+              model.bodyForce.z.isFinite else {
+            throw FEMError.invalidModel("Body force must be finite")
+        }
+        guard model.bodyForce != .zero,
+              model.material.density.isFinite,
+              model.material.density > 0 else {
+            return rightHandSide
+        }
+
+        let dimension = model.mesh.dimension
+        for elementIndex in model.mesh.elements.indices {
+            let data = try ElementKinematics.compute(
+                mesh: model.mesh,
+                material: model.material,
+                elementIndex: elementIndex
+            )
+            let element = model.mesh.elements[elementIndex]
+            let nodeForce = model.material.density * data.measure
+                / Double(element.nodes.count)
+            for node in element.nodes {
+                for axis in 0..<dimension {
+                    rightHandSide[node * dimension + axis] += nodeForce
+                        * model.bodyForce[axis]
+                }
+            }
+        }
+        return rightHandSide
+    }
+
     static func applyLoads(
         _ model: FEMModel,
         dimension: Int,
@@ -177,6 +217,7 @@ enum FEMAssembly {
                 data.stiffness(),
                 size: data.dofCount,
                 dofs: model.elementDOFs(elementIndex),
+                scale: try model.stiffnessScale(forElement: elementIndex),
                 into: &triplets
             )
         }
@@ -218,11 +259,12 @@ enum FEMAssembly {
         _ local: [Double],
         size: Int,
         dofs: [Int],
+        scale: Double = 1,
         into triplets: inout [SparseTriplet]
     ) {
         for row in 0..<size {
             for column in 0...row {
-                let value = local[row * size + column]
+                let value = local[row * size + column] * scale
                 guard value != 0 else { continue }
                 triplets.append(SparseTriplet(
                     row: dofs[row],

@@ -169,3 +169,98 @@ import simd
     #expect(stress.staticResult.maxVonMises.isFinite)
     #expect(stress.staticResult.maxDisplacement > 0)
 }
+
+@Test func projectRoundTripsDesignStudy() throws {
+    var project = try MeshLabProject.cantileverExample()
+    project.designStudy.kind = .topology
+    project.designStudy.topology.volumeFraction = 0.42
+    project.designStudy.topology.penalty = 3.5
+    project.designStudy.topology.filterRadius = 0.08
+    project.designStudy.topology.outerIterations = 3
+    project.designStudy.topology.innerIterations = 12
+    project.designStudy.topology.volumeTolerance = 0.02
+    project.designStudy.shape.selectionAxis = 1
+    project.designStudy.shape.motionAxis = 0
+    project.designStudy.shape.margin = 0.1
+    project.designStudy.parametric.axes[0].values = [150e9, 250e9]
+
+    let decoded = try MeshLabProjectFile.decode(
+        try MeshLabProjectFile.encode(project)
+    )
+    #expect(decoded == project)
+    #expect(decoded.schemaVersion == 3)
+    #expect(decoded.designStudy.kind == .topology)
+    #expect(decoded.designStudy.topology.volumeFraction == 0.42)
+    #expect(decoded.designStudy.shape.selectionAxis == 1)
+}
+
+@Test func projectReadsVersionTwoAndDefaultsDesignStudy() throws {
+    let project = try MeshLabProject.cantileverExample()
+    let data = try MeshLabProjectFile.encode(project)
+    var object = try #require(
+        try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    )
+    object["schemaVersion"] = 2
+    object.removeValue(forKey: "designStudy")
+    let v2Data = try JSONSerialization.data(withJSONObject: object)
+
+    let decoded = try MeshLabProjectFile.decode(v2Data)
+    #expect(decoded.schemaVersion == 2)
+    #expect(decoded.designStudy.kind == .parametric)
+    #expect(decoded.designStudy.parametric.axes.isEmpty)
+    #expect(decoded.designStudy.topology == TopologyStudy())
+    #expect(decoded.designStudy.shape == ShapeStudy())
+}
+
+@Test func designStudyRunsEveryKind() throws {
+    var project = try MeshLabProject.cantileverExample()
+    project.mesh = try MeshGenerators.structuredRectangle(
+        width: 4,
+        height: 1,
+        divisions: SIMD2(6, 2)
+    )
+    project.constraints = project.mesh.nodeIndices { abs($0.x) < 1e-12 }
+        .map { DirichletCondition.fixed(node: $0) }
+    let right = try #require(project.mesh.nodeIndices { abs($0.x - 4) < 1e-12 }.first)
+    project.loads = [Load.nodal(node: right, vector: SIMD3<Double>(0, -1_000, 0))]
+
+    project.designStudy.kind = .parametric
+    project.designStudy.parametric = ParametricStudy(axes: [
+        ParametricAxis(parameter: .youngModulus, values: [100e9, 200e9]),
+        ParametricAxis(parameter: .loadScale, values: [0.5, 1]),
+    ])
+    guard case .parametric(let parametric) = try project.designStudy.run(on: project) else {
+        Issue.record("Expected a parametric result")
+        return
+    }
+    #expect(parametric.samples.count == 4)
+
+    project.designStudy.kind = .topology
+    project.designStudy.topology = TopologyStudy(
+        volumeFraction: 0.5,
+        filterRadius: 0,
+        outerIterations: 2,
+        innerIterations: 15,
+        volumeTolerance: 0.03
+    )
+    guard case .topology(let topology) = try project.designStudy.run(on: project) else {
+        Issue.record("Expected a topology result")
+        return
+    }
+    #expect(topology.densities.count == project.mesh.elements.count)
+
+    project.designStudy.kind = .shape
+    project.designStudy.shape = ShapeStudy(
+        selectionAxis: 0,
+        motionAxis: 1,
+        margin: 0.15,
+        outerIterations: 1,
+        innerIterations: 4,
+        volumeTolerance: 0.05
+    )
+    guard case .shape(let shape) = try project.designStudy.run(on: project) else {
+        Issue.record("Expected a shape result")
+        return
+    }
+    #expect(shape.mesh.nodes.count == project.mesh.nodes.count)
+}
