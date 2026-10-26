@@ -83,12 +83,26 @@ P5 (Platform and scale) is complete:
 - a visionOS 1.0 package target that shares the SwiftUI workbench and
   UIKit/MetalKit viewport bridge.
 
-The package has 64 tests covering vector/dense/sparse math, mesh topology and
+P6 (Consolidation and interoperability) is complete:
+
+- a public, solver-facing `FEMLinearOperator` contract separates element
+  assembly from the current matrix-free CG implementation;
+- ASCII Gmsh 2.2/4.1 import supports linear triangles and tetrahedra, explicit
+  source units, and durable named physical regions;
+- legacy ASCII VTK export carries mesh geometry, displacement, and nodal von
+  Mises fields to external post-processors;
+- project schema v5 persists mesh provenance, normalized units, and regions,
+  while v1–v4 projects migrate with empty metadata;
+- `MeshLabValidate` emits deterministic JSON covering the operator seam,
+  assembled/matrix-free parity, and analytical thermal conduction.
+
+The package has 74 tests covering vector/dense/sparse math, mesh topology and
 surface extraction, linear-static FEM equilibrium, solver backends and
 factorization reuse, modal/transient dynamics, thermal conduction and thermal
 stress, parametric sweeps, compliance adjoints, topology/shape optimization,
 matrix-free parity and convergence, batch-sweep scheduling and failure
-reporting, project files and schema migration, CSV export, camera math,
+reporting, Gmsh/VTK interchange, deterministic validation, project files and
+schema migration, CSV export, camera math,
 render-scene mapping, stress palettes, surface picking, and Metal pipeline
 creation.
 
@@ -137,7 +151,8 @@ algorithms, sparse factorization, iterative solvers, nonlinear methods,
 optimization, and its own 2D/truss/continuum FEM models. MeshLab's design
 studies adapt those kernels to its assembled models; the fixed-step structural
 Newmark path is likewise a MeshLab adapter pending an upstream contribution
-(ADR 0005).
+(ADR 0005). The public FEM operator seam makes the matrix-free adapter
+replaceable when Swift-NumericCore exposes operator-based Krylov solvers.
 Rust-NumericCore stays behind Swift-NumericCore; MeshLab never imports the
 generated FFI bindings directly.
 
@@ -159,6 +174,7 @@ swift test
 swift build -c release
 swift run MeshLabApp
 swift run MeshLabSweep --help
+swift run MeshLabValidate
 ```
 
 The package resolves `Swift-NumericCore` 1.x from a released tag and commits
@@ -236,6 +252,9 @@ the environment it was captured on.
   element-by-element stiffness operator and Jacobi-preconditioned CG.
 - Batch analyses and design studies through `SweepJob`, `SweepRunner`, and the
   `MeshLabSweep` JSON worker.
+- ASCII Gmsh 2.2/4.1 import for first-order triangles/tetrahedra with explicit
+  units and named physical regions; legacy ASCII VTK result export.
+- Deterministic `MeshLabValidate` JSON for cross-version numerical checks.
 - Solver diagnostics: backward error, refinement steps, factor nonzeros, and
   LDLT inertia; same-pattern numeric refactorization.
 - Connectivity, unsupported-DOF, and free-DOF residual checks.
@@ -249,8 +268,8 @@ the environment it was captured on.
   summaries, and best-sample/optimized-field rendering.
 - Solver picker for Accelerate and NumericCore direct/iterative methods, plus
   a matrix-free CG path for static and thermal-structural studies.
-- Versioned JSON project import/export (schema v4, v1/v2/v3 migration); static,
-  modal, and thermal CSV result export.
+- Versioned JSON project import/export (schema v5, v1–v4 migration), ASCII
+  Gmsh mesh import, static/modal/thermal CSV, and legacy VTK result export.
 - Asynchronous solve with progress, cancellation of stale results, and errors.
 - Surface picking resolves the deformed hit point to a source node.
 - Stress colorbar mirrors the Metal five-stop palette.
@@ -279,11 +298,12 @@ the environment it was captured on.
 - No nonlinear statics, contact, buckling, or plasticity yet.
 - Constant-strain `tet4`/`tri3` elements only; no `tet10`, `hex8`, shells, or
   beams.
-- Structured meshes only; no CAD/mesh import, unstructured meshing, quality
-  metrics, or adaptivity.
+- Mesh generation is structured; Gmsh can supply unstructured first-order
+  meshes, but there is no CAD kernel, mesh repair, quality metric, or adaptivity.
 - No document-based autosave or report generation yet.
-- Import is limited to MeshLab project JSON; OBJ/STL/CAD import is not
-  implemented. Project schema v4 files are not readable by older clients.
+- Gmsh import is ASCII-only and limited to linear `triangle3`/`tetrahedron4`;
+  binary Gmsh, OBJ/STL/CAD, higher-order elements, and VTU/XDMF are not
+  implemented. Project schema v5 files are not readable by older clients.
 - Design optimization is limited to linear-static compliance with homogeneous
   Dirichlet constraints and no thermal loading.
 - Topology optimization reports densities but does not render a density field;
@@ -318,6 +338,7 @@ Sources/
   MeshLab/            umbrella module
   MeshLabApp/         SwiftUI workbench executable
   MeshLabSweep/       JSON batch-sweep command-line worker
+  MeshLabValidate/    deterministic interoperability validation worker
 Tests/
   MeshLabCoreTests/   math, mesh, FEM, design, and scale tests
   MeshLabRenderTests/ camera, scene, Metal pipeline tests
@@ -348,7 +369,10 @@ Scripts/
 - **P5 — Platform and scale (complete):** matrix-free CPU solves, cloud-ready
   batch sweeps and CLI, visionOS target support, and matrix-free
   thermal-structural coupling.
-- **P6 — GPU and advanced coupling:** Metal/MPS numerical paths, resumable
+- **P6 — Consolidation and interoperability (complete):** public FEM operator
+  seam, Gmsh/VTK interchange, schema-v5 mesh metadata, and deterministic
+  validation artifacts.
+- **P7 — GPU and advanced coupling:** Metal/MPS numerical paths, resumable
   cloud workers, and two-way multiphysics.
 
 ## Contributing

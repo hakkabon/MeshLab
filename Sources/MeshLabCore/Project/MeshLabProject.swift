@@ -35,11 +35,12 @@ public struct ThermalStudy: Sendable, Hashable, Codable {
 /// The project owns the mesh and analysis definition. Display settings travel
 /// with the document so reopening a project restores the same review state.
 public struct MeshLabProject: Sendable, Equatable, Codable {
-    public static let currentSchemaVersion = 4
+    public static let currentSchemaVersion = 5
 
     public var schemaVersion: Int
     public var name: String
     public var mesh: Mesh
+    public var meshMetadata: MeshMetadata
     public var material: ElasticMaterial
     public var constraints: [DirichletCondition]
     public var loads: [Load]
@@ -60,6 +61,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
     public init(
         name: String = "Untitled",
         mesh: Mesh,
+        meshMetadata: MeshMetadata = MeshMetadata(),
         material: ElasticMaterial,
         constraints: [DirichletCondition],
         loads: [Load] = [],
@@ -80,6 +82,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         self.schemaVersion = Self.currentSchemaVersion
         self.name = name
         self.mesh = mesh
+        self.meshMetadata = meshMetadata
         self.material = material
         self.constraints = constraints
         self.loads = loads
@@ -102,6 +105,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         case schemaVersion
         case name
         case mesh
+        case meshMetadata
         case material
         case constraints
         case loads
@@ -129,6 +133,10 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         self.schemaVersion = schemaVersion
         self.name = try container.decode(String.self, forKey: .name)
         self.mesh = try container.decode(Mesh.self, forKey: .mesh)
+        self.meshMetadata = try container.decodeIfPresent(
+            MeshMetadata.self,
+            forKey: .meshMetadata
+        ) ?? MeshMetadata()
         self.material = try container.decode(ElasticMaterial.self, forKey: .material)
         self.constraints = try container.decode([DirichletCondition].self, forKey: .constraints)
         self.loads = try container.decode([Load].self, forKey: .loads)

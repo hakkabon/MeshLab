@@ -50,6 +50,7 @@ final class WorkbenchModel: ObservableObject {
     @Published private(set) var selection: SurfacePick?
     @Published private(set) var lastSolveSeconds: Double?
     @Published var errorMessage: String?
+    @Published var gmshImportUnit: MeshLengthUnit = .meter
 
     private var solveTask: Task<Void, Never>?
     private var designTask: Task<Void, Never>?
@@ -83,6 +84,10 @@ final class WorkbenchModel: ObservableObject {
 
     var displayMesh: Mesh {
         designMesh ?? project.mesh
+    }
+
+    var exportResult: StaticResult? {
+        designStaticResult ?? result
     }
 
     var solverPreset: SolverPreset {
@@ -278,9 +283,29 @@ final class WorkbenchModel: ObservableObject {
         }
         do {
             let data = try Data(contentsOf: url)
-            project = try MeshLabProjectFile.decode(data)
-            clearResults()
-            solve()
+            if url.pathExtension.lowercased() == "msh" {
+                let imported = try GmshImporter.decode(
+                    data,
+                    options: GmshImportOptions(sourceLengthUnit: gmshImportUnit)
+                )
+                project = MeshLabProject(
+                    name: url.deletingPathExtension().lastPathComponent,
+                    mesh: imported.mesh,
+                    meshMetadata: imported.metadata,
+                    material: project.material,
+                    constraints: []
+                )
+                clearResults()
+                revision += 1
+                scene = RenderScene(
+                    surface: try imported.mesh.makeSurfaceMesh(),
+                    revision: revision
+                )
+            } else {
+                project = try MeshLabProjectFile.decode(data)
+                clearResults()
+                solve()
+            }
         } catch {
             errorMessage = "Import failed: \(Self.describe(error))"
         }

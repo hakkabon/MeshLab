@@ -189,7 +189,7 @@ public struct StaticAnalysis: Sendable {
         if matrixFree == nil {
             triplets.reserveCapacity(mesh.elements.count * 64)
         }
-        var elementOperators: [ElementStiffnessOperator.Element] = []
+        var elementOperators: [FEMElementContribution] = []
         if matrixFree != nil {
             elementOperators.reserveCapacity(mesh.elements.count)
         }
@@ -225,10 +225,9 @@ public struct StaticAnalysis: Sendable {
                 }
             }
             if matrixFree != nil {
-                elementOperators.append(ElementStiffnessOperator.Element(
-                    dofs: localDOFs,
-                    size: size,
-                    stiffness: stiffness.map { $0 * scale }
+                elementOperators.append(try FEMElementContribution(
+                    degreesOfFreedom: localDOFs,
+                    matrix: stiffness.map { $0 * scale }
                 ))
             }
         }
@@ -255,14 +254,13 @@ public struct StaticAnalysis: Sendable {
             throw FEMError.unconstrainedDegreesOfFreedom(unsupported)
         }
 
-        let matrixFreeOperator: ElementStiffnessOperator?
+        let matrixFreeOperator: FEMElementOperator?
         var assembledStiffness: SparseMatrix?
         let report: SparseSolveReport
         if let matrixFree {
-            let op = ElementStiffnessOperator(
-                dofCount: mesh.dofCount,
-                elements: elementOperators,
-                diagonal: diagonal
+            let op = try FEMElementOperator(
+                dimension: mesh.dofCount,
+                contributions: elementOperators
             )
             matrixFreeOperator = op
             var prescribedVector = [Double](repeating: 0, count: mesh.dofCount)
