@@ -13,6 +13,7 @@ relationship to the NumericCore ecosystem.
 | [0006](0006-design-loop.md) | Accepted | Add parametric sweeps, self-adjoint compliance sensitivities, SIMP topology optimization, discrete shape optimization, and project schema v3. |
 | [0007](0007-platform-and-scale.md) | Accepted | Add matrix-free static solves, batch sweep jobs and CLI, visionOS target support, and project schema v4. |
 | [0008](0008-consolidation-and-interoperability.md) | Accepted | Add a public FEM operator seam, Gmsh/VTK interchange, deterministic validation reports, and project schema v5. |
+| [0009](0009-production-linear-fea.md) | Accepted | Add named-region constraints/materials, load cases and combinations, envelopes, mesh quality, equilibrium reports, and project schema v6. |
 
 When a decision changes, add a new ADR that supersedes the old one rather than
 silently rewriting history.

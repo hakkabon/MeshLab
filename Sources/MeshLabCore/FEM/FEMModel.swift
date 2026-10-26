@@ -35,6 +35,8 @@ public enum Load: Sendable, Hashable, Codable {
 public struct FEMModel: Sendable {
     public var mesh: Mesh
     public var material: ElasticMaterial
+    /// Optional material per element. Empty uses `material` for every element.
+    public var elementMaterials: [ElasticMaterial]
     public var constraints: [DirichletCondition]
     public var loads: [Load]
     /// Acceleration applied to every element, typically gravity. The
@@ -53,6 +55,7 @@ public struct FEMModel: Sendable {
     public init(
         mesh: Mesh,
         material: ElasticMaterial,
+        elementMaterials: [ElasticMaterial] = [],
         constraints: [DirichletCondition],
         loads: [Load] = [],
         bodyForce: SIMD3<Double> = .zero,
@@ -61,6 +64,7 @@ public struct FEMModel: Sendable {
     ) {
         self.mesh = mesh
         self.material = material
+        self.elementMaterials = elementMaterials
         self.constraints = constraints
         self.loads = loads
         self.bodyForce = bodyForce
@@ -85,6 +89,19 @@ public struct FEMModel: Sendable {
             )
         }
         return scale
+    }
+
+    public func material(forElement index: Int) throws -> ElasticMaterial {
+        guard mesh.elements.indices.contains(index) else {
+            throw FEMError.invalidModel("Element material index is out of range")
+        }
+        guard !elementMaterials.isEmpty else { return material }
+        guard elementMaterials.count == mesh.elements.count else {
+            throw FEMError.invalidModel(
+                "Element materials must provide one value per element"
+            )
+        }
+        return elementMaterials[index]
     }
 
     public func globalDOF(node: Int, axis: Int) -> Int {
@@ -154,6 +171,18 @@ public struct StaticResult: Sendable {
     public let solveReport: SparseSolveReport
     public let maxDisplacement: Double
     public let maxVonMises: Double
+    public let equilibrium: StaticEquilibriumReport
+}
+
+public struct StaticEquilibriumReport: Sendable {
+    public let appliedForce: SIMD3<Double>
+    public let reactionForce: SIMD3<Double>
+    public let forceImbalance: SIMD3<Double>
+    public let appliedMoment: SIMD3<Double>
+    public let reactionMoment: SIMD3<Double>
+    public let momentImbalance: SIMD3<Double>
+    public let maximumFreeResidual: Double
+    public let relativeFreeResidual: Double
 }
 
 /// Linear static analysis with exact prescribed-value elimination.
@@ -202,7 +231,7 @@ public struct StaticAnalysis: Sendable {
             try Task.checkCancellation()
             let data = try ElementKinematics.compute(
                 mesh: mesh,
-                material: model.material,
+                material: try model.material(forElement: elementIndex),
                 elementIndex: elementIndex
             )
             kinematics.append(data)
@@ -378,13 +407,15 @@ public struct StaticAnalysis: Sendable {
         }
 
         var reactions = [SIMD3<Double>](repeating: .zero, count: mesh.nodes.count)
-        if options.computeReactions {
-            for node in mesh.nodes.indices {
-                let base = node * dimension
-                var vector = SIMD3<Double>.zero
-                vector.x = residual[base]
-                if dimension > 1 { vector.y = residual[base + 1] }
-                if dimension > 2 { vector.z = residual[base + 2] }
+        var equilibriumReactions = [SIMD3<Double>](repeating: .zero, count: mesh.nodes.count)
+        for node in mesh.nodes.indices {
+            let base = node * dimension
+            var vector = SIMD3<Double>.zero
+            for axis in 0..<dimension where prescribed[base + axis] != nil {
+                vector[axis] = residual[base + axis]
+            }
+            equilibriumReactions[node] = vector
+            if options.computeReactions {
                 reactions[node] = vector
             }
         }
@@ -437,6 +468,32 @@ public struct StaticAnalysis: Sendable {
             vonMisesCount[node] > 0 ? vonMisesSum[node] / Double(vonMisesCount[node]) : 0
         }
 
+        var appliedForce = SIMD3<Double>.zero
+        var reactionForce = SIMD3<Double>.zero
+        var appliedMoment = SIMD3<Double>.zero
+        var reactionMoment = SIMD3<Double>.zero
+        for node in mesh.nodes.indices {
+            let base = node * dimension
+            var applied = SIMD3<Double>.zero
+            applied.x = rightHandSide[base]
+            if dimension > 1 { applied.y = rightHandSide[base + 1] }
+            if dimension > 2 { applied.z = rightHandSide[base + 2] }
+            appliedForce += applied
+            reactionForce += equilibriumReactions[node]
+            appliedMoment += simd_cross(mesh.nodes[node], applied)
+            reactionMoment += simd_cross(mesh.nodes[node], equilibriumReactions[node])
+        }
+        let equilibrium = StaticEquilibriumReport(
+            appliedForce: appliedForce,
+            reactionForce: reactionForce,
+            forceImbalance: appliedForce + reactionForce,
+            appliedMoment: appliedMoment,
+            reactionMoment: reactionMoment,
+            momentImbalance: appliedMoment + reactionMoment,
+            maximumFreeResidual: maximumFreeResidual,
+            relativeFreeResidual: maximumFreeResidual / residualScale
+        )
+
         return StaticResult(
             displacements: displacements,
             elementStresses: elementStresses,
@@ -445,7 +502,8 @@ public struct StaticAnalysis: Sendable {
             strainEnergy: strainEnergy,
             solveReport: report,
             maxDisplacement: maxDisplacement,
-            maxVonMises: maxVonMises
+            maxVonMises: maxVonMises,
+            equilibrium: equilibrium
         )
     }
 

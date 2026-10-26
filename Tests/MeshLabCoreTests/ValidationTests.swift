@@ -9,6 +9,7 @@ import Testing
         "operator-contract-2x2",
         "cantilever-assembled-matrix-free",
         "linear-thermal-bar",
+        "structured-mesh-quality",
     ])
     #expect(try report.jsonData() == report.jsonData())
 }

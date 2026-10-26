@@ -163,6 +163,12 @@ public enum SweepRunner {
             maxVonMises = result.maxVonMises
             strainEnergy = result.strainEnergy
 
+        case .productionLinear:
+            let result = try ProductionLinearAnalysis.solve(project: project)
+            maxDisplacement = result.envelope.maximumDisplacement
+            maxVonMises = result.envelope.maximumVonMises
+            strainEnergy = result.results.map { $0.result.strainEnergy }.max()
+
         case .modal:
             let result = try ModalAnalysis(options: ModalOptions(
                 modeCount: project.modalModeCount

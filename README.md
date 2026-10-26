@@ -96,13 +96,26 @@ P6 (Consolidation and interoperability) is complete:
 - `MeshLabValidate` emits deterministic JSON covering the operator seam,
   assembled/matrix-free parity, and analytical thermal conduction.
 
-The package has 74 tests covering vector/dense/sparse math, mesh topology and
+P7 (Production linear FEA) is complete:
+
+- named imported regions drive component constraints, total nodal region
+  forces, and heterogeneous isotropic material assignments;
+- independent load cases and factored combinations produce selectable results
+  and traceable displacement/stress envelopes;
+- every static result reports force and moment balance plus free-DOF residuals;
+- scale-independent mesh-quality reports identify poor and inverted elements;
+- project schema v6 persists production studies and migrates v1–v5 documents;
+- the workbench runs configured production studies, displays envelope and
+  equilibrium diagnostics, and exports all cases/combinations as long-form CSV.
+
+The package has 80 tests covering vector/dense/sparse math, mesh topology and
 surface extraction, linear-static FEM equilibrium, solver backends and
 factorization reuse, modal/transient dynamics, thermal conduction and thermal
 stress, parametric sweeps, compliance adjoints, topology/shape optimization,
 matrix-free parity and convergence, batch-sweep scheduling and failure
 reporting, Gmsh/VTK interchange, deterministic validation, project files and
-schema migration, CSV export, camera math,
+schema migration, production load combinations, region materials, equilibrium,
+mesh quality, CSV export, camera math,
 render-scene mapping, stress palettes, surface picking, and Metal pipeline
 creation.
 
@@ -255,6 +268,10 @@ the environment it was captured on.
 - ASCII Gmsh 2.2/4.1 import for first-order triangles/tetrahedra with explicit
   units and named physical regions; legacy ASCII VTK result export.
 - Deterministic `MeshLabValidate` JSON for cross-version numerical checks.
+- Production linear studies with named-region constraints and materials,
+  independent load cases, factored combinations, and governing-result envelopes.
+- Static force/moment equilibrium and free-residual diagnostics, plus
+  scale-independent element quality reports.
 - Solver diagnostics: backward error, refinement steps, factor nonzeros, and
   LDLT inertia; same-pattern numeric refactorization.
 - Connectivity, unsupported-DOF, and free-DOF residual checks.
@@ -264,11 +281,13 @@ the environment it was captured on.
 - SwiftUI app with a built-in cantilever example and editable material/loads.
 - Static, modal, and thermal-structural study selection with mode-shape
   inspection and thermal boundary summary.
+- Production-linear study execution with case/combination selection, envelope
+  peaks, equilibrium diagnostics, and long-form multi-result CSV export.
 - Parametric, topology, and shape design studies with asynchronous runs,
   summaries, and best-sample/optimized-field rendering.
 - Solver picker for Accelerate and NumericCore direct/iterative methods, plus
   a matrix-free CG path for static and thermal-structural studies.
-- Versioned JSON project import/export (schema v5, v1–v4 migration), ASCII
+- Versioned JSON project import/export (schema v6, v1–v5 migration), ASCII
   Gmsh mesh import, static/modal/thermal CSV, and legacy VTK result export.
 - Asynchronous solve with progress, cancellation of stale results, and errors.
 - Surface picking resolves the deformed hit point to a source node.
@@ -299,11 +318,12 @@ the environment it was captured on.
 - Constant-strain `tet4`/`tri3` elements only; no `tet10`, `hex8`, shells, or
   beams.
 - Mesh generation is structured; Gmsh can supply unstructured first-order
-  meshes, but there is no CAD kernel, mesh repair, quality metric, or adaptivity.
+  meshes, but there is no CAD kernel, mesh repair, adaptivity, or discretization
+  error estimator. Quality indicators diagnose shape but do not prove accuracy.
 - No document-based autosave or report generation yet.
 - Gmsh import is ASCII-only and limited to linear `triangle3`/`tetrahedron4`;
   binary Gmsh, OBJ/STL/CAD, higher-order elements, and VTU/XDMF are not
-  implemented. Project schema v5 files are not readable by older clients.
+  implemented. Project schema v6 files are not readable by older clients.
 - Design optimization is limited to linear-static compliance with homogeneous
   Dirichlet constraints and no thermal loading.
 - Topology optimization reports densities but does not render a density field;
@@ -314,6 +334,11 @@ the environment it was captured on.
 - Matrix-free solves use Jacobi-preconditioned CG and are limited to symmetric
   positive-definite static/thermal-stress systems; modal, transient, and
   topology solves still use assembled matrices.
+- Production load cases currently assemble and factor independently; shared
+  stiffness factorization and multiple-right-hand-side solves are not yet used.
+- Region forces are distributed nodal totals, not automatically integrated
+  pressure loads. Production-study authoring is currently API/JSON based; the
+  workbench runs and reviews configured definitions but does not yet edit them.
 - NumericCore's MPS backend is not yet usable, so no GPU numerical path is
   shipped. The matrix-free CPU path is the current scale-out option.
 - Batch sweeps hold the full job and result set in memory and do not yet
@@ -372,8 +397,11 @@ Scripts/
 - **P6 — Consolidation and interoperability (complete):** public FEM operator
   seam, Gmsh/VTK interchange, schema-v5 mesh metadata, and deterministic
   validation artifacts.
-- **P7 — GPU and advanced coupling:** Metal/MPS numerical paths, resumable
-  cloud workers, and two-way multiphysics.
+- **P7 — Production linear FEA (complete):** named-region constraints and
+  materials, load cases/combinations, result envelopes, equilibrium and mesh
+  quality diagnostics, schema v6, and workbench review/export.
+- **P8 — GPU and advanced coupling:** Metal/MPS numerical paths, reusable
+  multi-RHS solves, resumable cloud workers, and two-way multiphysics.
 
 ## Contributing
 

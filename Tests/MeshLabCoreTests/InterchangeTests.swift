@@ -115,7 +115,7 @@ import Testing
 
     let decoded = try MeshLabProjectFile.decode(try MeshLabProjectFile.encode(project))
     #expect(decoded == project)
-    #expect(decoded.schemaVersion == 5)
+    #expect(decoded.schemaVersion == MeshLabProject.currentSchemaVersion)
     #expect(decoded.meshMetadata.regions.first?.name == "fixed")
 }
 

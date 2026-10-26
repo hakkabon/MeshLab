@@ -71,6 +71,7 @@ public enum MeshLabValidation {
             try operatorContractCase(),
             try assembledMatrixFreeCase(),
             try linearThermalCase(),
+            try meshQualityCase(),
         ])
     }
 
@@ -131,6 +132,18 @@ public enum MeshLabValidation {
                     absoluteTolerance: 1e-8,
                     relativeTolerance: 1e-7
                 ),
+                ValidationMetric(
+                    name: "force-imbalance",
+                    observed: simd_length(assembled.equilibrium.forceImbalance),
+                    reference: 0,
+                    absoluteTolerance: 1e-6
+                ),
+                ValidationMetric(
+                    name: "moment-imbalance",
+                    observed: simd_length(assembled.equilibrium.momentImbalance),
+                    reference: 0,
+                    absoluteTolerance: 1e-6
+                ),
             ]
         )
     }
@@ -178,6 +191,32 @@ public enum MeshLabValidation {
                     observed: maximumFluxError,
                     reference: 0,
                     absoluteTolerance: 1e-8
+                ),
+            ]
+        )
+    }
+
+    private static func meshQualityCase() throws -> ValidationCase {
+        let mesh = try MeshGenerators.structuredBox(
+            size: SIMD3<Double>(1, 1, 1),
+            divisions: SIMD3<Int>(1, 1, 1)
+        )
+        let report = mesh.qualityReport()
+        return ValidationCase(
+            identifier: "structured-mesh-quality",
+            category: "mesh",
+            metrics: [
+                ValidationMetric(
+                    name: "minimum-quality",
+                    observed: report.minimumQuality,
+                    reference: 1 / (3 * Foundation.sqrt(3)),
+                    absoluteTolerance: 1e-12
+                ),
+                ValidationMetric(
+                    name: "inverted-elements",
+                    observed: Double(report.invertedElementIndices.count),
+                    reference: 0,
+                    absoluteTolerance: 0
                 ),
             ]
         )

@@ -116,22 +116,24 @@ enum FEMAssembly {
               model.bodyForce.z.isFinite else {
             throw FEMError.invalidModel("Body force must be finite")
         }
-        guard model.bodyForce != .zero,
-              model.material.density.isFinite,
-              model.material.density > 0 else {
+        guard model.bodyForce != .zero else {
             return rightHandSide
         }
 
         let dimension = model.mesh.dimension
         for elementIndex in model.mesh.elements.indices {
             try Task.checkCancellation()
+            let material = try model.material(forElement: elementIndex)
+            guard material.density.isFinite, material.density >= 0 else {
+                throw FEMError.invalidModel("Material density is invalid")
+            }
             let data = try ElementKinematics.compute(
                 mesh: model.mesh,
-                material: model.material,
+                material: material,
                 elementIndex: elementIndex
             )
             let element = model.mesh.elements[elementIndex]
-            let nodeForce = model.material.density * data.measure
+            let nodeForce = material.density * data.measure
                 / Double(element.nodes.count)
             for node in element.nodes {
                 for axis in 0..<dimension {
@@ -211,7 +213,7 @@ enum FEMAssembly {
             try Task.checkCancellation()
             let data = try ElementKinematics.compute(
                 mesh: model.mesh,
-                material: model.material,
+                material: try model.material(forElement: elementIndex),
                 elementIndex: elementIndex
             )
             kinematics.append(data)
@@ -235,18 +237,18 @@ enum FEMAssembly {
         _ model: FEMModel,
         kinematics: [ElementKinematics]
     ) throws -> SparseMatrix {
-        guard model.material.density.isFinite, model.material.density > 0 else {
-            throw FEMError.invalidModel(
-                "Modal and transient analysis require positive material density"
-            )
-        }
-
         var triplets: [SparseTriplet] = []
         triplets.reserveCapacity(model.mesh.elements.count * 64)
         for data in kinematics {
             try Task.checkCancellation()
+            let density = try model.material(forElement: data.elementIndex).density
+            guard density.isFinite, density > 0 else {
+                throw FEMError.invalidModel(
+                    "Modal and transient analysis require positive material density"
+                )
+            }
             appendSymmetric(
-                data.mass(density: model.material.density),
+                data.mass(density: density),
                 size: data.dofCount,
                 dofs: model.elementDOFs(data.elementIndex),
                 into: &triplets
@@ -301,17 +303,15 @@ enum FEMAssembly {
         guard model.temperatureChange.allSatisfy(\.isFinite) else {
             throw FEMError.invalidModel("Temperature change contains a non-finite value")
         }
-        guard model.material.thermalExpansion.isFinite,
-              model.material.thermalExpansion >= 0 else {
-            throw FEMError.invalidModel("Material thermal expansion is invalid")
-        }
-
         var strains: [[Double]] = []
         strains.reserveCapacity(kinematics.count)
-        let expansion = model.material.thermalExpansion
 
         for data in kinematics {
             try Task.checkCancellation()
+            let expansion = try model.material(forElement: data.elementIndex).thermalExpansion
+            guard expansion.isFinite, expansion >= 0 else {
+                throw FEMError.invalidModel("Material thermal expansion is invalid")
+            }
             let change = data.nodeIndices.reduce(0.0) {
                 $0 + model.temperatureChange[$1]
             } / Double(data.nodeIndices.count)

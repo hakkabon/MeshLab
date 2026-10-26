@@ -7,6 +7,7 @@ public enum MeshLabProjectError: Error, Equatable, Sendable {
 
 public enum AnalysisKind: String, Sendable, Hashable, Codable, CaseIterable {
     case staticAnalysis = "static"
+    case productionLinear = "production-linear"
     case modal
     case thermalStructural
 }
@@ -35,7 +36,7 @@ public struct ThermalStudy: Sendable, Hashable, Codable {
 /// The project owns the mesh and analysis definition. Display settings travel
 /// with the document so reopening a project restores the same review state.
 public struct MeshLabProject: Sendable, Equatable, Codable {
-    public static let currentSchemaVersion = 5
+    public static let currentSchemaVersion = 6
 
     public var schemaVersion: Int
     public var name: String
@@ -57,6 +58,8 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
     public var designStudy: DesignStudy
     public var useMatrixFree: Bool
     public var matrixFreeOptions: MatrixFreeOptions
+    public var linearStudy: ProductionLinearStudy
+    public var selectedLinearResultID: String?
 
     public init(
         name: String = "Untitled",
@@ -77,7 +80,9 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         thermalStudy: ThermalStudy = ThermalStudy(),
         designStudy: DesignStudy = DesignStudy(),
         useMatrixFree: Bool = false,
-        matrixFreeOptions: MatrixFreeOptions = MatrixFreeOptions()
+        matrixFreeOptions: MatrixFreeOptions = MatrixFreeOptions(),
+        linearStudy: ProductionLinearStudy = ProductionLinearStudy(),
+        selectedLinearResultID: String? = nil
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.name = name
@@ -99,6 +104,8 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         self.designStudy = designStudy
         self.useMatrixFree = useMatrixFree
         self.matrixFreeOptions = matrixFreeOptions
+        self.linearStudy = linearStudy
+        self.selectedLinearResultID = selectedLinearResultID
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -122,6 +129,8 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         case designStudy
         case useMatrixFree
         case matrixFreeOptions
+        case linearStudy
+        case selectedLinearResultID
     }
 
     public init(from decoder: Decoder) throws {
@@ -174,6 +183,14 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
             MatrixFreeOptions.self,
             forKey: .matrixFreeOptions
         ) ?? MatrixFreeOptions()
+        self.linearStudy = try container.decodeIfPresent(
+            ProductionLinearStudy.self,
+            forKey: .linearStudy
+        ) ?? ProductionLinearStudy()
+        self.selectedLinearResultID = try container.decodeIfPresent(
+            String.self,
+            forKey: .selectedLinearResultID
+        )
     }
 
     public func makeModel() -> FEMModel {
@@ -264,17 +281,6 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
     }
 }
 
-private extension Load {
-    func scaled(by factor: Double) -> Load {
-        switch self {
-        case .nodal(let node, let vector):
-            return .nodal(node: node, vector: vector * factor)
-        case .traction(let nodes, let vector):
-            return .traction(nodes: nodes, vector: vector * factor)
-        }
-    }
-}
-
 public enum MeshLabProjectFile {
     public static func encode(_ project: MeshLabProject) throws -> Data {
         let encoder = JSONEncoder()
@@ -307,6 +313,37 @@ public enum AnalysisResultExport {
                 number(displacement.z),
                 number(result.nodalVonMises[node]),
             ].joined(separator: ","))
+        }
+        return rows.joined(separator: "\n") + "\n"
+    }
+
+    /// Exports every production load-case and combination result in long form.
+    public static func linearStudyCSV(
+        project: MeshLabProject,
+        result: ProductionLinearResult
+    ) -> String {
+        var rows = [
+            "resultID,resultName,resultKind,node,x,y,z,ux,uy,uz,vonMises",
+        ]
+        rows.reserveCapacity(result.results.count * project.mesh.nodes.count + 1)
+        for value in result.results {
+            for node in project.mesh.nodes.indices {
+                let position = project.mesh.nodes[node]
+                let displacement = value.result.displacements[node]
+                rows.append([
+                    csvText(value.id),
+                    csvText(value.name),
+                    value.kind.rawValue,
+                    String(node),
+                    number(position.x),
+                    number(position.y),
+                    number(position.z),
+                    number(displacement.x),
+                    number(displacement.y),
+                    number(displacement.z),
+                    number(value.result.nodalVonMises[node]),
+                ].joined(separator: ","))
+            }
         }
         return rows.joined(separator: "\n") + "\n"
     }
@@ -358,5 +395,9 @@ public enum AnalysisResultExport {
 
     private static func number(_ value: Double) -> String {
         String(format: "%.17g", locale: Locale(identifier: "en_US_POSIX"), value)
+    }
+
+    private static func csvText(_ value: String) -> String {
+        "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }
 }

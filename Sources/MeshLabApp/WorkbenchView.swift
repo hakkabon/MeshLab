@@ -142,6 +142,24 @@ struct WorkbenchView: View {
                         in: 1...50
                     )
                 }
+                if model.project.analysis == .productionLinear {
+                    LabeledContent(
+                        "Load cases",
+                        value: "\(model.project.linearStudy.loadCases.count)"
+                    )
+                    LabeledContent(
+                        "Combinations",
+                        value: "\(model.project.linearStudy.combinations.count)"
+                    )
+                    LabeledContent(
+                        "Region constraints",
+                        value: "\(model.project.linearStudy.regionConstraints.count)"
+                    )
+                    LabeledContent(
+                        "Material regions",
+                        value: "\(model.project.linearStudy.materialAssignments.count)"
+                    )
+                }
                 if model.project.analysis == .thermalStructural {
                     LabeledContent(
                         "Thermal BCs",
@@ -491,6 +509,48 @@ struct WorkbenchView: View {
                     } else {
                         emptyResults
                     }
+                case .productionLinear:
+                    if let linear = model.linearResult,
+                       let result = model.result {
+                        Picker(
+                            "Result",
+                            selection: Binding(
+                                get: {
+                                    model.project.selectedLinearResultID
+                                        ?? linear.results.first?.id
+                                        ?? ""
+                                },
+                                set: { model.setSelectedLinearResult($0) }
+                            )
+                        ) {
+                            ForEach(linear.results, id: \.id) { value in
+                                Text(value.name).tag(value.id)
+                            }
+                        }
+                        LabeledContent(
+                            "Envelope displacement",
+                            value: String(
+                                format: "%.4g mm",
+                                linear.envelope.maximumDisplacement * 1_000
+                            )
+                        )
+                        if let identifier = linear.envelope.maximumDisplacementResultID {
+                            LabeledContent("Displacement governs", value: identifier)
+                        }
+                        LabeledContent(
+                            "Envelope stress",
+                            value: String(
+                                format: "%.4g MPa",
+                                linear.envelope.maximumVonMises / 1e6
+                            )
+                        )
+                        if let identifier = linear.envelope.maximumVonMisesResultID {
+                            LabeledContent("Stress governs", value: identifier)
+                        }
+                        staticResultRows(result)
+                    } else {
+                        emptyResults
+                    }
                 case .modal:
                     if let modalResult = model.modalResult {
                         Picker(
@@ -706,6 +766,24 @@ struct WorkbenchView: View {
             value: String(format: "%.4g J", result.strainEnergy)
         )
         LabeledContent(
+            "Force imbalance",
+            value: String(
+                format: "%.3g N",
+                simd_length(result.equilibrium.forceImbalance)
+            )
+        )
+        LabeledContent(
+            "Moment imbalance",
+            value: String(
+                format: "%.3g N·m",
+                simd_length(result.equilibrium.momentImbalance)
+            )
+        )
+        LabeledContent(
+            "Free residual",
+            value: String(format: "%.3g", result.equilibrium.relativeFreeResidual)
+        )
+        LabeledContent(
             "Solve time",
             value: model.lastSolveSeconds.map {
                 String(format: "%.1f ms", $0 * 1_000)
@@ -858,6 +936,8 @@ struct WorkbenchView: View {
         switch model.project.analysis {
         case .staticAnalysis:
             return "Choose a solver and run the analysis to generate the rendered stress field."
+        case .productionLinear:
+            return "Run the configured load cases and combinations, then inspect individual or envelope results."
         case .modal:
             return "Run a modal analysis, then inspect the mass-normalized mode shapes."
         case .thermalStructural:
@@ -938,6 +1018,7 @@ private extension AnalysisKind {
     var title: String {
         switch self {
         case .staticAnalysis: return "Static"
+        case .productionLinear: return "Production linear"
         case .modal: return "Modal"
         case .thermalStructural: return "Thermal structural"
         }

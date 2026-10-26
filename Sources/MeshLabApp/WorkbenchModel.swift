@@ -15,6 +15,7 @@ struct NodeInspection: Identifiable {
 
 private enum SolveOutcome: Sendable {
     case staticResult(StaticResult)
+    case productionLinear(ProductionLinearResult)
     case modal(ModalResult)
     case thermal(thermal: ThermalResult, stress: StaticResult)
 }
@@ -41,6 +42,7 @@ final class WorkbenchModel: ObservableObject {
     @Published private(set) var result: StaticResult?
     @Published private(set) var modalResult: ModalResult?
     @Published private(set) var thermalResult: ThermalResult?
+    @Published private(set) var linearResult: ProductionLinearResult?
     @Published private(set) var scene: RenderScene?
     @Published private(set) var designResult: DesignRunResult?
     @Published private(set) var isSolving = false
@@ -152,7 +154,7 @@ final class WorkbenchModel: ObservableObject {
 
     var hasResults: Bool {
         switch project.analysis {
-        case .staticAnalysis, .thermalStructural:
+        case .staticAnalysis, .thermalStructural, .productionLinear:
             return result != nil
         case .modal:
             return modalResult != nil
@@ -164,6 +166,12 @@ final class WorkbenchModel: ObservableObject {
         case .staticAnalysis:
             guard let result else { return "" }
             return AnalysisResultExport.csv(project: project, result: result)
+        case .productionLinear:
+            guard let linearResult else { return "" }
+            return AnalysisResultExport.linearStudyCSV(
+                project: project,
+                result: linearResult
+            )
         case .modal:
             guard let modalResult else { return "" }
             return AnalysisResultExport.modalCSV(project: project, result: modalResult)
@@ -355,6 +363,23 @@ final class WorkbenchModel: ObservableObject {
         project.selectedMode = min(max(index, 0), modalResult.modes.count - 1)
     }
 
+    func setSelectedLinearResult(_ id: String) {
+        guard let selected = linearResult?.result(id: id) else { return }
+        project.selectedLinearResultID = id
+        result = selected.result
+        do {
+            revision += 1
+            scene = RenderScene(
+                surface: try project.mesh.makeSurfaceMesh(),
+                result: selected.result,
+                revision: revision
+            )
+            selection = nil
+        } catch {
+            errorMessage = "Could not prepare the render scene: \(Self.describe(error))"
+        }
+    }
+
     func setSolverPreset(_ preset: SolverPreset) {
         project.solverMethod = preset.method
     }
@@ -491,15 +516,27 @@ final class WorkbenchModel: ObservableObject {
                 result = staticResult
                 modalResult = nil
                 thermalResult = nil
+                linearResult = nil
                 scene = RenderScene(
                     surface: surface,
                     result: staticResult,
                     revision: revision
                 )
+            case .productionLinear(let production):
+                linearResult = production
+                modalResult = nil
+                thermalResult = nil
+                let selected = production.result(id: project.selectedLinearResultID)
+                project.selectedLinearResultID = selected?.id
+                result = selected?.result
+                scene = selected.map {
+                    RenderScene(surface: surface, result: $0.result, revision: revision)
+                } ?? RenderScene(surface: surface, revision: revision)
             case .modal(let modalResult):
                 self.modalResult = modalResult
                 result = nil
                 thermalResult = nil
+                linearResult = nil
                 if !modalResult.modes.indices.contains(project.selectedMode) {
                     project.selectedMode = 0
                 }
@@ -508,6 +545,7 @@ final class WorkbenchModel: ObservableObject {
                 self.thermalResult = thermalResult
                 self.result = stress
                 modalResult = nil
+                linearResult = nil
                 scene = RenderScene(
                     surface: surface,
                     result: stress,
@@ -617,6 +655,7 @@ final class WorkbenchModel: ObservableObject {
         result = nil
         modalResult = nil
         thermalResult = nil
+        linearResult = nil
         scene = nil
         selection = nil
         needsSolve = true
@@ -629,6 +668,9 @@ final class WorkbenchModel: ObservableObject {
             let result = try StaticAnalysis(options: project.makeAnalysisOptions())
                 .solve(project.makeModel())
             return .staticResult(result)
+
+        case .productionLinear:
+            return .productionLinear(try ProductionLinearAnalysis.solve(project: project))
 
         case .modal:
             let result = try ModalAnalysis(options: ModalOptions(
@@ -749,6 +791,7 @@ enum SolverPreset: String, CaseIterable, Identifiable {
 private extension MeshLabProject {
     func hasSameAnalysis(as other: MeshLabProject) -> Bool {
         mesh == other.mesh
+            && meshMetadata == other.meshMetadata
             && material == other.material
             && constraints == other.constraints
             && loads == other.loads
@@ -761,5 +804,6 @@ private extension MeshLabProject {
             && analysis == other.analysis
             && modalModeCount == other.modalModeCount
             && thermalStudy == other.thermalStudy
+            && linearStudy == other.linearStudy
     }
 }
