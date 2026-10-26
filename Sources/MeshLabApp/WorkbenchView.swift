@@ -160,6 +160,26 @@ struct WorkbenchView: View {
                         value: "\(model.project.linearStudy.materialAssignments.count)"
                     )
                 }
+                if model.project.analysis == .nonlinearStatic {
+                    LabeledContent(
+                        "Load steps",
+                        value: "\(model.project.nonlinearOptions.loadSteps)"
+                    )
+                    LabeledContent(
+                        "Newton limit",
+                        value: "\(model.project.nonlinearOptions.maximumNewtonIterations)"
+                    )
+                }
+                if model.project.analysis == .coupledThermoMechanical {
+                    LabeledContent(
+                        "Coupling limit",
+                        value: "\(model.project.coupledOptions.maximumIterations)"
+                    )
+                    LabeledContent(
+                        "Relaxation",
+                        value: String(format: "%.3g", model.project.coupledOptions.relaxation)
+                    )
+                }
                 if model.project.analysis == .thermalStructural {
                     LabeledContent(
                         "Thermal BCs",
@@ -551,6 +571,43 @@ struct WorkbenchView: View {
                     } else {
                         emptyResults
                     }
+                case .nonlinearStatic:
+                    if let nonlinear = model.nonlinearResult,
+                       let result = model.result {
+                        LabeledContent(
+                            "Load steps",
+                            value: "\(nonlinear.loadSteps.count)"
+                        )
+                        LabeledContent(
+                            "Newton iterations",
+                            value: "\(nonlinear.totalNewtonIterations)"
+                        )
+                        staticResultRows(result)
+                    } else {
+                        emptyResults
+                    }
+                case .coupledThermoMechanical:
+                    if let coupled = model.coupledResult,
+                       let result = model.result {
+                        LabeledContent(
+                            "Coupling",
+                            value: coupled.converged ? "Converged" : "Iteration limit"
+                        )
+                        LabeledContent(
+                            "Coupling iterations",
+                            value: "\(coupled.iterations.count)"
+                        )
+                        LabeledContent(
+                            "Max temperature",
+                            value: String(
+                                format: "%.4g K",
+                                coupled.thermalResult.maximumTemperature
+                            )
+                        )
+                        staticResultRows(result)
+                    } else {
+                        emptyResults
+                    }
                 case .modal:
                     if let modalResult = model.modalResult {
                         Picker(
@@ -938,6 +995,10 @@ struct WorkbenchView: View {
             return "Choose a solver and run the analysis to generate the rendered stress field."
         case .productionLinear:
             return "Run the configured load cases and combinations, then inspect individual or envelope results."
+        case .nonlinearStatic:
+            return "Run incremental finite-strain equilibrium with damped Newton iterations."
+        case .coupledThermoMechanical:
+            return "Run staggered thermal and structural fields until their updates converge."
         case .modal:
             return "Run a modal analysis, then inspect the mass-normalized mode shapes."
         case .thermalStructural:
@@ -1019,6 +1080,8 @@ private extension AnalysisKind {
         switch self {
         case .staticAnalysis: return "Static"
         case .productionLinear: return "Production linear"
+        case .nonlinearStatic: return "Nonlinear static"
+        case .coupledThermoMechanical: return "Coupled thermo-mechanical"
         case .modal: return "Modal"
         case .thermalStructural: return "Thermal structural"
         }

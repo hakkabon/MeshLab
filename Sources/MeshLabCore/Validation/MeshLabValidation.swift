@@ -72,6 +72,7 @@ public enum MeshLabValidation {
             try assembledMatrixFreeCase(),
             try linearThermalCase(),
             try meshQualityCase(),
+            try finiteStrainSmallLoadCase(),
         ])
     }
 
@@ -217,6 +218,58 @@ public enum MeshLabValidation {
                     observed: Double(report.invertedElementIndices.count),
                     reference: 0,
                     absoluteTolerance: 0
+                ),
+            ]
+        )
+    }
+
+    private static func finiteStrainSmallLoadCase() throws -> ValidationCase {
+        let mesh = try Mesh(
+            nodes: [
+                SIMD3<Double>(0, 0, 0),
+                SIMD3<Double>(1, 0, 0),
+                SIMD3<Double>(0, 1, 0),
+                SIMD3<Double>(0, 0, 1),
+            ],
+            elements: [Element(type: .tetrahedron4, nodes: [0, 1, 2, 3])]
+        )
+        let material = try ElasticMaterial(youngModulus: 1e7, poissonRatio: 0.3)
+        let model = FEMModel(
+            mesh: mesh,
+            material: material,
+            constraints: [
+                .fixed(node: 0),
+                .fixed(node: 1, axis: 1),
+                .fixed(node: 1, axis: 2),
+                .fixed(node: 2, axis: 2),
+            ],
+            loads: [.nodal(node: 3, vector: SIMD3<Double>(0, 0, 10))]
+        )
+        let linear = try StaticAnalysis(options: AnalysisOptions(
+            solverMethod: .numericCoreCholesky
+        )).solve(model)
+        let nonlinear = try NonlinearStaticAnalysis(options: NonlinearStaticOptions(
+            loadSteps: 2,
+            maximumNewtonIterations: 20,
+            residualTolerance: 1e-10,
+            stepTolerance: 1e-12
+        )).solve(model).staticResult
+        return ValidationCase(
+            identifier: "finite-strain-small-load",
+            category: "nonlinear-structural",
+            metrics: [
+                ValidationMetric(
+                    name: "maximum-displacement",
+                    observed: nonlinear.maxDisplacement,
+                    reference: linear.maxDisplacement,
+                    absoluteTolerance: 1e-12,
+                    relativeTolerance: 1e-4
+                ),
+                ValidationMetric(
+                    name: "relative-free-residual",
+                    observed: nonlinear.equilibrium.relativeFreeResidual,
+                    reference: 0,
+                    absoluteTolerance: 1e-9
                 ),
             ]
         )

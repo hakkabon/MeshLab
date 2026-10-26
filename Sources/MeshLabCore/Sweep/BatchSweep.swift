@@ -169,6 +169,27 @@ public enum SweepRunner {
             maxVonMises = result.envelope.maximumVonMises
             strainEnergy = result.results.map { $0.result.strainEnergy }.max()
 
+        case .nonlinearStatic:
+            let result = try NonlinearStaticAnalysis(options: project.nonlinearOptions)
+                .solve(project.makeModel()).staticResult
+            maxDisplacement = result.maxDisplacement
+            maxVonMises = result.maxVonMises
+            strainEnergy = result.strainEnergy
+
+        case .coupledThermoMechanical:
+            let result = try CoupledThermoMechanicalAnalysis(
+                options: project.coupledOptions,
+                analysisOptions: project.makeAnalysisOptions(),
+                referenceTemperature: project.thermalStudy.referenceTemperature
+            ).solve(
+                thermal: project.makeThermalModel(),
+                structural: project.makeModel()
+            )
+            maxTemperature = result.thermalResult.maximumTemperature
+            maxDisplacement = result.staticResult.maxDisplacement
+            maxVonMises = result.staticResult.maxVonMises
+            strainEnergy = result.staticResult.strainEnergy
+
         case .modal:
             let result = try ModalAnalysis(options: ModalOptions(
                 modeCount: project.modalModeCount

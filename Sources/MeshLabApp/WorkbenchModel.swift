@@ -16,6 +16,8 @@ struct NodeInspection: Identifiable {
 private enum SolveOutcome: Sendable {
     case staticResult(StaticResult)
     case productionLinear(ProductionLinearResult)
+    case nonlinear(NonlinearStaticResult)
+    case coupled(CoupledThermoMechanicalResult)
     case modal(ModalResult)
     case thermal(thermal: ThermalResult, stress: StaticResult)
 }
@@ -43,6 +45,8 @@ final class WorkbenchModel: ObservableObject {
     @Published private(set) var modalResult: ModalResult?
     @Published private(set) var thermalResult: ThermalResult?
     @Published private(set) var linearResult: ProductionLinearResult?
+    @Published private(set) var nonlinearResult: NonlinearStaticResult?
+    @Published private(set) var coupledResult: CoupledThermoMechanicalResult?
     @Published private(set) var scene: RenderScene?
     @Published private(set) var designResult: DesignRunResult?
     @Published private(set) var isSolving = false
@@ -154,7 +158,8 @@ final class WorkbenchModel: ObservableObject {
 
     var hasResults: Bool {
         switch project.analysis {
-        case .staticAnalysis, .thermalStructural, .productionLinear:
+        case .staticAnalysis, .thermalStructural, .productionLinear,
+             .nonlinearStatic, .coupledThermoMechanical:
             return result != nil
         case .modal:
             return modalResult != nil
@@ -171,6 +176,16 @@ final class WorkbenchModel: ObservableObject {
             return AnalysisResultExport.linearStudyCSV(
                 project: project,
                 result: linearResult
+            )
+        case .nonlinearStatic:
+            guard let result else { return "" }
+            return AnalysisResultExport.csv(project: project, result: result)
+        case .coupledThermoMechanical:
+            guard let result, let thermalResult else { return "" }
+            return AnalysisResultExport.thermalCSV(
+                project: project,
+                temperatures: thermalResult.temperatures,
+                result: result
             )
         case .modal:
             guard let modalResult else { return "" }
@@ -517,6 +532,8 @@ final class WorkbenchModel: ObservableObject {
                 modalResult = nil
                 thermalResult = nil
                 linearResult = nil
+                nonlinearResult = nil
+                coupledResult = nil
                 scene = RenderScene(
                     surface: surface,
                     result: staticResult,
@@ -532,11 +549,39 @@ final class WorkbenchModel: ObservableObject {
                 scene = selected.map {
                     RenderScene(surface: surface, result: $0.result, revision: revision)
                 } ?? RenderScene(surface: surface, revision: revision)
+                nonlinearResult = nil
+                coupledResult = nil
+            case .nonlinear(let nonlinear):
+                nonlinearResult = nonlinear
+                coupledResult = nil
+                linearResult = nil
+                modalResult = nil
+                thermalResult = nil
+                result = nonlinear.staticResult
+                scene = RenderScene(
+                    surface: surface,
+                    result: nonlinear.staticResult,
+                    revision: revision
+                )
+            case .coupled(let coupled):
+                coupledResult = coupled
+                nonlinearResult = nil
+                linearResult = nil
+                modalResult = nil
+                thermalResult = coupled.thermalResult
+                result = coupled.staticResult
+                scene = RenderScene(
+                    surface: surface,
+                    result: coupled.staticResult,
+                    revision: revision
+                )
             case .modal(let modalResult):
                 self.modalResult = modalResult
                 result = nil
                 thermalResult = nil
                 linearResult = nil
+                nonlinearResult = nil
+                coupledResult = nil
                 if !modalResult.modes.indices.contains(project.selectedMode) {
                     project.selectedMode = 0
                 }
@@ -546,6 +591,8 @@ final class WorkbenchModel: ObservableObject {
                 self.result = stress
                 modalResult = nil
                 linearResult = nil
+                nonlinearResult = nil
+                coupledResult = nil
                 scene = RenderScene(
                     surface: surface,
                     result: stress,
@@ -656,6 +703,8 @@ final class WorkbenchModel: ObservableObject {
         modalResult = nil
         thermalResult = nil
         linearResult = nil
+        nonlinearResult = nil
+        coupledResult = nil
         scene = nil
         selection = nil
         needsSolve = true
@@ -671,6 +720,22 @@ final class WorkbenchModel: ObservableObject {
 
         case .productionLinear:
             return .productionLinear(try ProductionLinearAnalysis.solve(project: project))
+
+        case .nonlinearStatic:
+            return .nonlinear(
+                try NonlinearStaticAnalysis(options: project.nonlinearOptions)
+                    .solve(project.makeModel())
+            )
+
+        case .coupledThermoMechanical:
+            return .coupled(try CoupledThermoMechanicalAnalysis(
+                options: project.coupledOptions,
+                analysisOptions: project.makeAnalysisOptions(),
+                referenceTemperature: project.thermalStudy.referenceTemperature
+            ).solve(
+                thermal: project.makeThermalModel(),
+                structural: project.makeModel()
+            ))
 
         case .modal:
             let result = try ModalAnalysis(options: ModalOptions(
@@ -805,5 +870,7 @@ private extension MeshLabProject {
             && modalModeCount == other.modalModeCount
             && thermalStudy == other.thermalStudy
             && linearStudy == other.linearStudy
+            && nonlinearOptions == other.nonlinearOptions
+            && coupledOptions == other.coupledOptions
     }
 }

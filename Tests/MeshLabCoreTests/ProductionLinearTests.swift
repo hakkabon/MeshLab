@@ -153,12 +153,12 @@ private func productionProject() throws -> MeshLabProject {
     #expect(result.equilibrium.relativeFreeResidual < 1e-10)
 }
 
-@Test func projectVersionSixRoundTripsProductionStudyAndMigratesVersionFive() throws {
+@Test func productionStudyRoundTripsCurrentSchemaAndMigratesVersionFive() throws {
     let project = try productionProject()
     let data = try MeshLabProjectFile.encode(project)
     let decoded = try MeshLabProjectFile.decode(data)
     #expect(decoded == project)
-    #expect(decoded.schemaVersion == 6)
+    #expect(decoded.schemaVersion == MeshLabProject.currentSchemaVersion)
 
     var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
     object["schemaVersion"] = 5

@@ -8,6 +8,8 @@ public enum MeshLabProjectError: Error, Equatable, Sendable {
 public enum AnalysisKind: String, Sendable, Hashable, Codable, CaseIterable {
     case staticAnalysis = "static"
     case productionLinear = "production-linear"
+    case nonlinearStatic = "nonlinear-static"
+    case coupledThermoMechanical = "coupled-thermo-mechanical"
     case modal
     case thermalStructural
 }
@@ -36,7 +38,7 @@ public struct ThermalStudy: Sendable, Hashable, Codable {
 /// The project owns the mesh and analysis definition. Display settings travel
 /// with the document so reopening a project restores the same review state.
 public struct MeshLabProject: Sendable, Equatable, Codable {
-    public static let currentSchemaVersion = 6
+    public static let currentSchemaVersion = 7
 
     public var schemaVersion: Int
     public var name: String
@@ -60,6 +62,8 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
     public var matrixFreeOptions: MatrixFreeOptions
     public var linearStudy: ProductionLinearStudy
     public var selectedLinearResultID: String?
+    public var nonlinearOptions: NonlinearStaticOptions
+    public var coupledOptions: CoupledThermoMechanicalOptions
 
     public init(
         name: String = "Untitled",
@@ -82,7 +86,9 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         useMatrixFree: Bool = false,
         matrixFreeOptions: MatrixFreeOptions = MatrixFreeOptions(),
         linearStudy: ProductionLinearStudy = ProductionLinearStudy(),
-        selectedLinearResultID: String? = nil
+        selectedLinearResultID: String? = nil,
+        nonlinearOptions: NonlinearStaticOptions = NonlinearStaticOptions(),
+        coupledOptions: CoupledThermoMechanicalOptions = CoupledThermoMechanicalOptions()
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.name = name
@@ -106,6 +112,8 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         self.matrixFreeOptions = matrixFreeOptions
         self.linearStudy = linearStudy
         self.selectedLinearResultID = selectedLinearResultID
+        self.nonlinearOptions = nonlinearOptions
+        self.coupledOptions = coupledOptions
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -131,6 +139,8 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         case matrixFreeOptions
         case linearStudy
         case selectedLinearResultID
+        case nonlinearOptions
+        case coupledOptions
     }
 
     public init(from decoder: Decoder) throws {
@@ -191,6 +201,14 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
             String.self,
             forKey: .selectedLinearResultID
         )
+        self.nonlinearOptions = try container.decodeIfPresent(
+            NonlinearStaticOptions.self,
+            forKey: .nonlinearOptions
+        ) ?? NonlinearStaticOptions()
+        self.coupledOptions = try container.decodeIfPresent(
+            CoupledThermoMechanicalOptions.self,
+            forKey: .coupledOptions
+        ) ?? CoupledThermoMechanicalOptions()
     }
 
     public func makeModel() -> FEMModel {

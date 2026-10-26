@@ -4,11 +4,11 @@ MeshLab is an Apple-native finite-element analysis foundation and Metal viewer
 in progress. It combines Swift geometry and 3D element assembly with the
 NumericCore numerical stack and a real-time Metal renderer.
 
-It provides linear-elastic static, modal, transient, and steady thermal
-analysis of tetrahedral and triangular meshes, stress recovery, compliance
-design studies, an interactive Metal viewport, and a SwiftUI product slice for
-opening, solving, optimizing, inspecting, and exporting projects on macOS, iOS,
-and visionOS.
+It provides linear-elastic and finite-strain static, modal, transient, steady
+thermal, and staggered thermo-mechanical analysis of tetrahedral and triangular
+meshes, stress recovery, compliance design studies, an interactive Metal
+viewport, and a SwiftUI product slice for opening, solving, optimizing,
+inspecting, and exporting projects on macOS, iOS, and visionOS.
 
 ## Status
 
@@ -108,7 +108,22 @@ P7 (Production linear FEA) is complete:
 - the workbench runs configured production studies, displays envelope and
   equilibrium diagnostics, and exports all cases/combinations as long-form CSV.
 
-The package has 80 tests covering vector/dense/sparse math, mesh topology and
+P8 (Nonlinear and coupled engineering) is complete for the first bounded
+production slice:
+
+- total-Lagrangian finite-strain `tet4` statics use a Saint Venant--Kirchhoff
+  material, consistent tangent assembly, incremental loading, and damped Newton
+  iteration from NumericCore;
+- converged nonlinear results include deformed-configuration Cauchy stress,
+  reactions, energy, equilibrium diagnostics, and the standard rendering/CSV
+  fields;
+- staggered steady thermo-mechanical iteration lets deformation update the
+  conduction geometry and temperature drive thermal strain plus optional
+  temperature-dependent stiffness, with relaxation and convergence histories;
+- project schema v7, batch execution, workbench execution/inspection, and
+  deterministic small-load validation cover both new analysis kinds.
+
+The package has 85 tests covering vector/dense/sparse math, mesh topology and
 surface extraction, linear-static FEM equilibrium, solver backends and
 factorization reuse, modal/transient dynamics, thermal conduction and thermal
 stress, parametric sweeps, compliance adjoints, topology/shape optimization,
@@ -158,9 +173,9 @@ creation.
 
 ### Ownership boundary
 
-MeshLab owns geometry, meshing, 3D element formulations, assembly, design-study
-formulations, rendering, and application UX. NumericCore owns reusable numerical
-algorithms, sparse factorization, iterative solvers, nonlinear methods,
+MeshLab owns geometry, meshing, 3D element formulations, residual/tangent
+assembly, design-study formulations, rendering, and application UX. NumericCore
+owns reusable numerical algorithms, sparse factorization, iterative solvers, nonlinear methods,
 optimization, and its own 2D/truss/continuum FEM models. MeshLab's design
 studies adapt those kernels to its assembled models; the fixed-step structural
 Newmark path is likewise a MeshLab adapter pending an upstream contribution
@@ -252,6 +267,11 @@ the environment it was captured on.
   heat-flux recovery.
 - One-way thermal-structural coupling with equivalent thermal loads and
   thermal-strain stress recovery.
+- Incremental total-Lagrangian finite-strain statics for `tet4` meshes, with a
+  consistent Saint Venant--Kirchhoff tangent and NumericCore damped Newton solve.
+- Staggered steady thermo-mechanical analysis with deformed conduction geometry,
+  thermal strain, optional temperature-dependent Young's modulus, relaxation,
+  and convergence history.
 - Parametric static sweeps with Cartesian axes and objective-based best-sample
   selection.
 - Self-adjoint compliance sensitivities and finite-difference-checked gradients.
@@ -281,13 +301,15 @@ the environment it was captured on.
 - SwiftUI app with a built-in cantilever example and editable material/loads.
 - Static, modal, and thermal-structural study selection with mode-shape
   inspection and thermal boundary summary.
+- Nonlinear-static and staggered thermo-mechanical execution with load-step,
+  Newton-iteration, coupling-convergence, and temperature summaries.
 - Production-linear study execution with case/combination selection, envelope
   peaks, equilibrium diagnostics, and long-form multi-result CSV export.
 - Parametric, topology, and shape design studies with asynchronous runs,
   summaries, and best-sample/optimized-field rendering.
 - Solver picker for Accelerate and NumericCore direct/iterative methods, plus
   a matrix-free CG path for static and thermal-structural studies.
-- Versioned JSON project import/export (schema v6, v1–v5 migration), ASCII
+- Versioned JSON project import/export (schema v7, v1–v6 migration), ASCII
   Gmsh mesh import, static/modal/thermal CSV, and legacy VTK result export.
 - Asynchronous solve with progress, cancellation of stale results, and errors.
 - Surface picking resolves the deformed hit point to a source node.
@@ -309,12 +331,17 @@ the environment it was captured on.
 - Modal and transient analyses require homogeneous Dirichlet constraints.
 - Transient dynamics is a library API only; the workbench does not yet expose
   load histories or time animation.
-- Thermal-structural coupling remains one-way and currently 3D-only.
-  Plane-strain thermal stress needs a separate reduced constitutive treatment,
-  and two-way coupling needs a coupled/transient governing formulation.
+- Thermo-mechanical coupling is steady, staggered, and currently 3D-only. It
+  couples through deformed conduction geometry, thermal strain, and an optional
+  uniform temperature-dependent stiffness factor; it is not a monolithic
+  tangent formulation and does not model mechanical heat generation.
 - Thermal analysis is steady-state only; convection and radiation are not
   implemented.
-- No nonlinear statics, contact, buckling, or plasticity yet.
+- Nonlinear statics is limited to total-Lagrangian `tet4` elements with a Saint
+  Venant--Kirchhoff material, homogeneous displacement constraints, fixed load
+  steps, and a dense Newton Jacobian. It is intended for moderate finite strain;
+  robust hyperelasticity, adaptive stepping, contact, buckling, and plasticity
+  are not implemented.
 - Constant-strain `tet4`/`tri3` elements only; no `tet10`, `hex8`, shells, or
   beams.
 - Mesh generation is structured; Gmsh can supply unstructured first-order
@@ -323,7 +350,7 @@ the environment it was captured on.
 - No document-based autosave or report generation yet.
 - Gmsh import is ASCII-only and limited to linear `triangle3`/`tetrahedron4`;
   binary Gmsh, OBJ/STL/CAD, higher-order elements, and VTU/XDMF are not
-  implemented. Project schema v6 files are not readable by older clients.
+  implemented. Project schema v7 files are not readable by older clients.
 - Design optimization is limited to linear-static compliance with homogeneous
   Dirichlet constraints and no thermal loading.
 - Topology optimization reports densities but does not render a density field;
@@ -387,8 +414,8 @@ Scripts/
   solve, picking, colorbar.
 - **P3 — Dynamics and multiphysics (complete):** 3D modal/transient, steady
   thermal, and one-way thermal-structural coupling.
-- **P3b — Nonlinear and higher-order:** nonlinear statics, `tet10`/`hex8`
-  elements, shells, and beams.
+- **P3b — Higher-order and structural elements:** `tet10`/`hex8` elements,
+  shells, and beams.
 - **P4 — Design loop (complete):** parametric studies, adjoint sensitivities,
   shape and topology optimization.
 - **P5 — Platform and scale (complete):** matrix-free CPU solves, cloud-ready
@@ -400,8 +427,13 @@ Scripts/
 - **P7 — Production linear FEA (complete):** named-region constraints and
   materials, load cases/combinations, result envelopes, equilibrium and mesh
   quality diagnostics, schema v6, and workbench review/export.
-- **P8 — GPU and advanced coupling:** Metal/MPS numerical paths, reusable
-  multi-RHS solves, resumable cloud workers, and two-way multiphysics.
+- **P8 — Nonlinear and coupled engineering (complete):** incremental
+  finite-strain `tet4` statics, NumericCore damped Newton iteration, staggered
+  steady thermo-mechanical coupling, schema v7, batch and workbench integration.
+- **P9 — Scale and advanced constitutive physics:** sparse/matrix-free nonlinear
+  tangents, adaptive continuation, hyperelasticity/plasticity/contact,
+  monolithic and transient multiphysics, Metal/MPS numerical paths, reusable
+  multi-RHS solves, and resumable cloud workers.
 
 ## Contributing
 

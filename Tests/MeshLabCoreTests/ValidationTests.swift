@@ -10,6 +10,7 @@ import Testing
         "cantilever-assembled-matrix-free",
         "linear-thermal-bar",
         "structured-mesh-quality",
+        "finite-strain-small-load",
     ])
     #expect(try report.jsonData() == report.jsonData())
 }
