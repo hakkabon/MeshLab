@@ -188,7 +188,7 @@ import simd
         try MeshLabProjectFile.encode(project)
     )
     #expect(decoded == project)
-    #expect(decoded.schemaVersion == 4)
+    #expect(decoded.schemaVersion == MeshLabProject.currentSchemaVersion)
     #expect(decoded.designStudy.kind == .topology)
     #expect(decoded.designStudy.topology.volumeFraction == 0.42)
     #expect(decoded.designStudy.shape.selectionAxis == 1)

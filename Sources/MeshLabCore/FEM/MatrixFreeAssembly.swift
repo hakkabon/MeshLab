@@ -1,28 +1,81 @@
 import Foundation
 
+/// Solver-facing contract for a square linear operator.
+///
+/// The contract deliberately contains no mesh or element semantics. It is the
+/// seam through which MeshLab can consume a future NumericCore matrix-free
+/// Krylov implementation without moving geometry or model ownership across the
+/// package boundary.
+public protocol FEMLinearOperator: Sendable {
+    var dimension: Int { get }
+    var diagonal: [Double] { get }
+    func multiply(_ vector: [Double]) -> [Double]
+}
+
+public enum FEMOperatorError: Error, Equatable, Sendable {
+    case invalidDimension
+    case invalidContribution
+    case degreeOfFreedomOutOfRange(Int)
+}
+
+/// Dense local contribution and its global degree-of-freedom map.
+public struct FEMElementContribution: Sendable, Hashable {
+    public let degreesOfFreedom: [Int]
+    public let matrix: [Double]
+
+    public init(degreesOfFreedom: [Int], matrix: [Double]) throws {
+        guard !degreesOfFreedom.isEmpty,
+              matrix.count == degreesOfFreedom.count * degreesOfFreedom.count,
+              matrix.allSatisfy(\.isFinite) else {
+            throw FEMOperatorError.invalidContribution
+        }
+        self.degreesOfFreedom = degreesOfFreedom
+        self.matrix = matrix
+    }
+}
+
 /// Element-by-element global stiffness operator for matrix-free solves.
-struct ElementStiffnessOperator: Sendable {
-    struct Element: Sendable {
-        let dofs: [Int]
-        let size: Int
-        let stiffness: [Double]
+public struct FEMElementOperator: FEMLinearOperator {
+    public let dimension: Int
+    public let contributions: [FEMElementContribution]
+    public let diagonal: [Double]
+
+    public init(
+        dimension: Int,
+        contributions: [FEMElementContribution]
+    ) throws {
+        guard dimension > 0, !contributions.isEmpty else {
+            throw FEMOperatorError.invalidDimension
+        }
+        var diagonal = [Double](repeating: 0, count: dimension)
+        for contribution in contributions {
+            for (local, dof) in contribution.degreesOfFreedom.enumerated() {
+                guard (0..<dimension).contains(dof) else {
+                    throw FEMOperatorError.degreeOfFreedomOutOfRange(dof)
+                }
+                diagonal[dof] += contribution.matrix[
+                    local * contribution.degreesOfFreedom.count + local
+                ]
+            }
+        }
+        self.dimension = dimension
+        self.contributions = contributions
+        self.diagonal = diagonal
     }
 
-    let dofCount: Int
-    let elements: [Element]
-    let diagonal: [Double]
-
-    func multiply(_ vector: [Double]) -> [Double] {
-        var result = [Double](repeating: 0, count: dofCount)
-        for element in elements {
-            for row in 0..<element.size {
+    public func multiply(_ vector: [Double]) -> [Double] {
+        precondition(vector.count == dimension, "Operator and vector dimensions must match")
+        var result = [Double](repeating: 0, count: dimension)
+        for contribution in contributions {
+            let size = contribution.degreesOfFreedom.count
+            for row in 0..<size {
                 var value = 0.0
-                let offset = row * element.size
-                for column in 0..<element.size {
-                    value += element.stiffness[offset + column]
-                        * vector[element.dofs[column]]
+                let offset = row * size
+                for column in 0..<size {
+                    value += contribution.matrix[offset + column]
+                        * vector[contribution.degreesOfFreedom[column]]
                 }
-                result[element.dofs[row]] += value
+                result[contribution.degreesOfFreedom[row]] += value
             }
         }
         return result
@@ -45,7 +98,7 @@ struct MatrixFreeConjugateGradient {
     }
 
     static func solve(
-        operator matrixFreeOperator: ElementStiffnessOperator,
+        operator matrixFreeOperator: any FEMLinearOperator,
         freeDOFs: [Int],
         rightHandSide: [Double],
         options: MatrixFreeOptions
@@ -86,7 +139,7 @@ struct MatrixFreeConjugateGradient {
             let fullDirection = expand(
                 direction,
                 freeDOFs: freeDOFs,
-                dofCount: matrixFreeOperator.dofCount
+                dofCount: matrixFreeOperator.dimension
             )
             let product = matrixFreeOperator.multiply(fullDirection)
             let denominator = VectorMath.dot(direction, freeDOFs.map { product[$0] })

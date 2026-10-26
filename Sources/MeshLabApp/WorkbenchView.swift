@@ -9,6 +9,7 @@ struct WorkbenchView: View {
     @State private var isImporting = false
     @State private var isExportingProject = false
     @State private var isExportingResults = false
+    @State private var isExportingVTK = false
     @State private var didAutoSolve = false
 
     var body: some View {
@@ -35,6 +36,9 @@ struct WorkbenchView: View {
                         isExportingResults = true
                     }
                     .disabled(!model.hasResults || model.needsSolve)
+                    Button("Export VTK…") {
+                        isExportingVTK = true
+                    }
                 } label: {
                     Label("Export", systemImage: "square.and.arrow.up")
                 }
@@ -50,7 +54,7 @@ struct WorkbenchView: View {
         }
         .fileImporter(
             isPresented: $isImporting,
-            allowedContentTypes: [.json],
+            allowedContentTypes: [.json, .gmshMesh],
             allowsMultipleSelection: false
         ) { result in
             switch result {
@@ -82,6 +86,16 @@ struct WorkbenchView: View {
                 model.errorMessage = "Export failed: \(error.localizedDescription)"
             }
         }
+        .fileExporter(
+            isPresented: $isExportingVTK,
+            document: VTKDocument(mesh: model.displayMesh, result: model.exportResult),
+            contentType: .legacyVTK,
+            defaultFilename: "\(model.project.name)-results"
+        ) { result in
+            if case .failure(let error) = result {
+                model.errorMessage = "Export failed: \(error.localizedDescription)"
+            }
+        }
         .onAppear {
             guard !didAutoSolve else { return }
             didAutoSolve = true
@@ -93,6 +107,11 @@ struct WorkbenchView: View {
         Form {
             Section("Project") {
                 TextField("Name", text: $model.project.name)
+                Picker("Gmsh units", selection: $model.gmshImportUnit) {
+                    ForEach(MeshLengthUnit.allCases, id: \.self) { unit in
+                        Text(unit.rawValue.capitalized).tag(unit)
+                    }
+                }
                 Button("Reset Cantilever Example") {
                     model.loadCantileverExample()
                 }
