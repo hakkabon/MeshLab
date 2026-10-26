@@ -13,9 +13,19 @@ struct MeshLabSweepCommand {
                 input = try Data(contentsOf: URL(fileURLWithPath: arguments.input))
             }
             let job = try SweepJobFile.decode(input)
+            let previous: SweepBatchResult?
+            if let resume = arguments.resume {
+                previous = try SweepJobFile.decodeResult(
+                    Data(contentsOf: URL(fileURLWithPath: resume))
+                )
+            } else {
+                previous = nil
+            }
             let result = await SweepRunner.run(
                 job,
-                maxConcurrency: arguments.concurrency
+                maxConcurrency: arguments.concurrency,
+                resuming: previous,
+                retryFailures: arguments.retryFailures
             )
             let data = try SweepJobFile.encode(result)
             if let output = arguments.output {
@@ -43,11 +53,15 @@ struct MeshLabSweepCommand {
         var input: String
         var output: String?
         var concurrency: Int
+        var resume: String?
+        var retryFailures: Bool
 
         init(_ values: [String]) throws {
             var input: String?
             var output: String?
             var concurrency = max(1, ProcessInfo.processInfo.activeProcessorCount)
+            var resume: String?
+            var retryFailures = false
             var iterator = values.makeIterator()
             while let value = iterator.next() {
                 switch value {
@@ -66,6 +80,15 @@ struct MeshLabSweepCommand {
                         )
                     }
                     concurrency = parsed
+                case "--resume":
+                    guard let value = iterator.next() else {
+                        throw CLIError.invalidArguments(
+                            "--resume needs a previous result path"
+                        )
+                    }
+                    resume = value
+                case "--retry-failures":
+                    retryFailures = true
                 case "--help", "-h":
                     throw CLIError.usage
                 default:
@@ -81,6 +104,8 @@ struct MeshLabSweepCommand {
             self.input = input
             self.output = output
             self.concurrency = concurrency
+            self.resume = resume
+            self.retryFailures = retryFailures
         }
     }
 
@@ -93,6 +118,7 @@ struct MeshLabSweepCommand {
             case .usage:
                 return """
                 Usage: MeshLabSweep <job.json|-> [--output result.json] [--concurrency N]
+                       [--resume previous-result.json] [--retry-failures]
                 """
             case .invalidArguments(let message):
                 return message

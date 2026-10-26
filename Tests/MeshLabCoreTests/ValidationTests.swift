@@ -11,6 +11,7 @@ import Testing
         "linear-thermal-bar",
         "structured-mesh-quality",
         "finite-strain-small-load",
+        "constrained-parametric-pareto",
     ])
     #expect(try report.jsonData() == report.jsonData())
 }

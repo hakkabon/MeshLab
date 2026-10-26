@@ -18,6 +18,17 @@ public struct ParametricSample: Sendable {
     public let maxDisplacement: Double
     public let maxVonMises: Double
     public let strainEnergy: Double
+    public let isFeasible: Bool
+}
+
+public struct ParametricConstraint: Sendable, Hashable, Codable {
+    public var metric: ParametricObjective
+    public var upperBound: Double
+
+    public init(metric: ParametricObjective, upperBound: Double) {
+        self.metric = metric
+        self.upperBound = upperBound
+    }
 }
 
 public struct ParametricResult: Sendable {
@@ -25,12 +36,18 @@ public struct ParametricResult: Sendable {
     public let samples: [ParametricSample]
     public let objective: ParametricObjective
     public let bestIndex: Int
+    /// Non-dominated feasible samples for the configured Pareto objectives.
+    public let paretoIndices: [Int]
     /// The model and solved field of the best sample, ready for review.
     public let bestModel: FEMModel
     public let bestResult: StaticResult
 
     public var best: ParametricSample? {
         samples.indices.contains(bestIndex) ? samples[bestIndex] : nil
+    }
+
+    public var feasibleSampleCount: Int {
+        samples.lazy.filter(\.isFeasible).count
     }
 
     public func value(of parameter: DesignParameter, in sample: ParametricSample) -> Double? {
@@ -46,18 +63,61 @@ public struct ParametricResult: Sendable {
 public struct ParametricStudy: Sendable, Hashable, Codable {
     public var axes: [ParametricAxis]
     public var objective: ParametricObjective
+    /// Hard upper response limits. The primary objective is minimized over the
+    /// feasible set.
+    public var constraints: [ParametricConstraint]
+    /// Metrics used to compute the non-dominated feasible sample set.
+    public var paretoObjectives: [ParametricObjective]
 
     public init(
         axes: [ParametricAxis],
-        objective: ParametricObjective = .compliance
+        objective: ParametricObjective = .compliance,
+        constraints: [ParametricConstraint] = [],
+        paretoObjectives: [ParametricObjective] = ParametricObjective.allCases
     ) {
         self.axes = axes
         self.objective = objective
+        self.constraints = constraints
+        self.paretoObjectives = paretoObjectives
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case axes
+        case objective
+        case constraints
+        case paretoObjectives
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        axes = try container.decode([ParametricAxis].self, forKey: .axes)
+        objective = try container.decode(ParametricObjective.self, forKey: .objective)
+        constraints = try container.decodeIfPresent(
+            [ParametricConstraint].self,
+            forKey: .constraints
+        ) ?? []
+        paretoObjectives = try container.decodeIfPresent(
+            [ParametricObjective].self,
+            forKey: .paretoObjectives
+        ) ?? ParametricObjective.allCases
     }
 
     public func validate() throws {
         guard !axes.isEmpty else {
             throw DesignError.invalidStudy("A parametric study needs at least one axis")
+        }
+        guard Set(axes.map(\.parameter)).count == axes.count else {
+            throw DesignError.invalidStudy("Parametric axes must use unique parameters")
+        }
+        guard !paretoObjectives.isEmpty,
+              Set(paretoObjectives).count == paretoObjectives.count else {
+            throw DesignError.invalidStudy("Pareto objectives must be non-empty and unique")
+        }
+        guard Set(constraints.map(\.metric)).count == constraints.count,
+              constraints.allSatisfy({ $0.upperBound.isFinite && $0.upperBound >= 0 }) else {
+            throw DesignError.invalidStudy(
+                "Parametric constraints must have unique metrics and finite non-negative limits"
+            )
         }
         var combinations = 1
         for axis in axes {
@@ -98,13 +158,25 @@ public struct ParametricStudy: Sendable, Hashable, Codable {
             let variant = try applying(values, to: project)
             let result = try StaticAnalysis(options: analysisOptions)
                 .solve(variant.makeModel())
-            samples.append(ParametricSample(
+            let response = ParametricSample(
                 index: sampleIndex,
                 values: values,
                 compliance: 2 * result.strainEnergy,
                 maxDisplacement: result.maxDisplacement,
                 maxVonMises: result.maxVonMises,
-                strainEnergy: result.strainEnergy
+                strainEnergy: result.strainEnergy,
+                isFeasible: true
+            )
+            samples.append(ParametricSample(
+                index: response.index,
+                values: response.values,
+                compliance: response.compliance,
+                maxDisplacement: response.maxDisplacement,
+                maxVonMises: response.maxVonMises,
+                strainEnergy: response.strainEnergy,
+                isFeasible: constraints.allSatisfy {
+                    objectiveValue(response, objective: $0.metric) <= $0.upperBound
+                }
             ))
             sampleIndex += 1
 
@@ -118,9 +190,19 @@ public struct ParametricStudy: Sendable, Hashable, Codable {
             if axis < 0 { break }
         }
 
-        let bestIndex = samples.indices.min {
+        let feasible = samples.indices.filter { samples[$0].isFeasible }
+        guard let bestIndex = feasible.min(by: {
             objectiveValue(samples[$0]) < objectiveValue(samples[$1])
-        } ?? 0
+        }) else {
+            throw DesignError.optimizationFailed(
+                "No parametric sample satisfies the configured constraints"
+            )
+        }
+        let paretoIndices = feasible.filter { candidate in
+            !feasible.contains { challenger in
+                challenger != candidate && dominates(samples[challenger], samples[candidate])
+            }
+        }
         let bestVariant = try applying(samples[bestIndex].values, to: project)
         let bestResult = try StaticAnalysis(options: analysisOptions)
             .solve(bestVariant.makeModel())
@@ -129,6 +211,7 @@ public struct ParametricStudy: Sendable, Hashable, Codable {
             samples: samples,
             objective: objective,
             bestIndex: bestIndex,
+            paretoIndices: paretoIndices,
             bestModel: bestVariant.makeModel(),
             bestResult: bestResult
         )
@@ -179,11 +262,29 @@ public struct ParametricStudy: Sendable, Hashable, Codable {
     }
 
     private func objectiveValue(_ sample: ParametricSample) -> Double {
+        objectiveValue(sample, objective: objective)
+    }
+
+    private func objectiveValue(
+        _ sample: ParametricSample,
+        objective: ParametricObjective
+    ) -> Double {
         switch objective {
         case .compliance: return sample.compliance
         case .maxDisplacement: return sample.maxDisplacement
         case .maxVonMises: return sample.maxVonMises
         }
+    }
+
+    private func dominates(_ first: ParametricSample, _ second: ParametricSample) -> Bool {
+        var strictlyBetter = false
+        for objective in paretoObjectives {
+            let lhs = objectiveValue(first, objective: objective)
+            let rhs = objectiveValue(second, objective: objective)
+            if lhs > rhs { return false }
+            if lhs < rhs { strictlyBetter = true }
+        }
+        return strictlyBetter
     }
 
     private static func validate(

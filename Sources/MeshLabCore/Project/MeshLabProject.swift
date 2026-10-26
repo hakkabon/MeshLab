@@ -38,7 +38,7 @@ public struct ThermalStudy: Sendable, Hashable, Codable {
 /// The project owns the mesh and analysis definition. Display settings travel
 /// with the document so reopening a project restores the same review state.
 public struct MeshLabProject: Sendable, Equatable, Codable {
-    public static let currentSchemaVersion = 7
+    public static let currentSchemaVersion = 8
 
     public var schemaVersion: Int
     public var name: String
@@ -312,6 +312,59 @@ public enum MeshLabProjectFile {
 }
 
 public enum AnalysisResultExport {
+    /// Exports the active design study in a stable long-form representation.
+    public static func designCSV(_ result: DesignRunResult) -> String {
+        switch result {
+        case .parametric(let value):
+            let parameters = value.axes.map { $0.parameter.rawValue }
+            var rows = [
+                (["sample", "feasible", "pareto"] + parameters + [
+                    "compliance", "maxDisplacement", "maxVonMises", "strainEnergy",
+                ]).joined(separator: ","),
+            ]
+            let pareto = Set(value.paretoIndices)
+            for sample in value.samples {
+                rows.append(([
+                    String(sample.index),
+                    String(sample.isFeasible),
+                    String(pareto.contains(sample.index)),
+                ] + sample.values.map(number) + [
+                    number(sample.compliance),
+                    number(sample.maxDisplacement),
+                    number(sample.maxVonMises),
+                    number(sample.strainEnergy),
+                ]).joined(separator: ","))
+            }
+            return rows.joined(separator: "\n") + "\n"
+
+        case .topology(let value):
+            var rows = ["element,density,stiffnessScale"]
+            for index in value.densities.indices {
+                rows.append([
+                    String(index),
+                    number(value.densities[index]),
+                    number(value.stiffnessScales[index]),
+                ].joined(separator: ","))
+            }
+            return rows.joined(separator: "\n") + "\n"
+
+        case .shape(let value):
+            var rows = ["variable,node,axis,coordinate,lower,upper"]
+            for index in value.variables.indices {
+                let variable = value.variables[index]
+                rows.append([
+                    String(index),
+                    String(variable.node),
+                    String(variable.axis),
+                    number(value.design[index]),
+                    number(variable.lower),
+                    number(variable.upper),
+                ].joined(separator: ","))
+            }
+            return rows.joined(separator: "\n") + "\n"
+        }
+    }
+
     /// Exports nodal displacements and von Mises stress as CSV.
     public static func csv(project: MeshLabProject, result: StaticResult) -> String {
         var rows = [

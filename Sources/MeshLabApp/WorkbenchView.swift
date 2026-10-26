@@ -240,6 +240,14 @@ struct WorkbenchView: View {
                         )
                     }
                     LabeledContent("Objective", value: study.objective.title)
+                    LabeledContent(
+                        "Constraints",
+                        value: "\(study.constraints.count)"
+                    )
+                    LabeledContent(
+                        "Pareto metrics",
+                        value: study.paretoObjectives.map(\.title).joined(separator: ", ")
+                    )
 
                 case .topology:
                     LabeledContent(
@@ -688,6 +696,11 @@ struct WorkbenchView: View {
                 value: "#\(result.bestIndex + 1) of \(result.samples.count)"
             )
             LabeledContent("Objective", value: result.objective.title)
+            LabeledContent(
+                "Feasible samples",
+                value: "\(result.feasibleSampleCount) of \(result.samples.count)"
+            )
+            LabeledContent("Pareto samples", value: "\(result.paretoIndices.count)")
             if let best = result.best {
                 ForEach(Array(result.axes.enumerated()), id: \.offset) { index, axis in
                     if best.values.indices.contains(index) {

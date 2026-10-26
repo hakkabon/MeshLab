@@ -15,6 +15,7 @@ relationship to the NumericCore ecosystem.
 | [0008](0008-consolidation-and-interoperability.md) | Accepted | Add a public FEM operator seam, Gmsh/VTK interchange, deterministic validation reports, and project schema v5. |
 | [0009](0009-production-linear-fea.md) | Accepted | Add named-region constraints/materials, load cases and combinations, envelopes, mesh quality, equilibrium reports, and project schema v6. |
 | [0010](0010-nonlinear-and-coupled-engineering.md) | Accepted | Add finite-strain tet4 statics, NumericCore damped Newton iteration, staggered steady thermo-mechanical coupling, and project schema v7. |
+| [0011](0011-advanced-design-and-scale.md) | Accepted | Add constrained Pareto exploration, design CSV export, fingerprinted sweep resume/retry, and project schema v8. |
 
 When a decision changes, add a new ADR that supersedes the old one rather than
 silently rewriting history.

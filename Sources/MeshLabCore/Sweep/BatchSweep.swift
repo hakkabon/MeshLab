@@ -54,12 +54,16 @@ public struct SweepSummary: Sendable, Hashable, Codable {
     public let finalCompliance: Double?
     public let volumeFraction: Double?
     public let iterations: Int?
+    /// Stable hash of the request definition used to guard resume reuse.
+    public var requestFingerprint: String? = nil
 }
 
 public struct SweepBatchResult: Sendable, Hashable, Codable {
     public let name: String
     public let elapsedSeconds: Double
     public let summaries: [SweepSummary]
+    public var resumedRequestCount: Int? = nil
+    public var executedRequestCount: Int? = nil
 }
 
 /// Runs a sweep request without throwing. Failures travel as structured
@@ -67,15 +71,20 @@ public struct SweepBatchResult: Sendable, Hashable, Codable {
 public enum SweepRunner {
     public static func run(_ request: SweepRequest) -> SweepSummary {
         let started = Date()
+        let fingerprint = fingerprint(request)
         do {
             switch request.task {
             case .analysis:
-                return try runAnalysis(request, started: started)
+                var summary = try runAnalysis(request, started: started)
+                summary.requestFingerprint = fingerprint
+                return summary
             case .design:
-                return try runDesign(request, started: started)
+                var summary = try runDesign(request, started: started)
+                summary.requestFingerprint = fingerprint
+                return summary
             }
         } catch {
-            return SweepSummary(
+            var summary = SweepSummary(
                 id: request.id,
                 projectName: request.project.name,
                 task: request.task,
@@ -96,30 +105,64 @@ public enum SweepRunner {
                 volumeFraction: nil,
                 iterations: nil
             )
+            summary.requestFingerprint = fingerprint
+            return summary
         }
     }
 
     /// Executes a job with bounded concurrency while preserving request order.
+    /// A matching fingerprint from `previous` is reused. Failed prior requests
+    /// are reused unless `retryFailures` is true.
     public static func run(
         _ job: SweepJob,
-        maxConcurrency: Int = max(1, ProcessInfo.processInfo.activeProcessorCount)
+        maxConcurrency: Int = max(1, ProcessInfo.processInfo.activeProcessorCount),
+        resuming previous: SweepBatchResult? = nil,
+        retryFailures: Bool = false
     ) async -> SweepBatchResult {
         let started = Date()
         guard !job.requests.isEmpty else {
             return SweepBatchResult(
                 name: job.name,
                 elapsedSeconds: Date().timeIntervalSince(started),
-                summaries: []
+                summaries: [],
+                resumedRequestCount: 0,
+                executedRequestCount: 0
             )
         }
-        let limit = max(1, min(maxConcurrency, job.requests.count))
         var summaries = [SweepSummary?](
             repeating: nil,
             count: job.requests.count
         )
+        let previousByID = Dictionary(grouping: previous?.summaries ?? [], by: \.id)
+        var pending: [Int] = []
+        var resumed = 0
+        for (index, request) in job.requests.enumerated() {
+            let fingerprint = fingerprint(request)
+            let reusable = previousByID[request.id]?.first {
+                $0.requestFingerprint == fingerprint
+                    && ($0.status == .succeeded || !retryFailures)
+            }
+            if let reusable {
+                summaries[index] = reusable
+                resumed += 1
+            } else {
+                pending.append(index)
+            }
+        }
+        guard !pending.isEmpty else {
+            return SweepBatchResult(
+                name: job.name,
+                elapsedSeconds: Date().timeIntervalSince(started),
+                summaries: summaries.compactMap { $0 },
+                resumedRequestCount: resumed,
+                executedRequestCount: 0
+            )
+        }
+        let limit = max(1, min(maxConcurrency, pending.count))
         await withTaskGroup(of: (Int, SweepSummary).self) { group in
             var next = 0
-            func add(_ index: Int) {
+            func add(_ pendingIndex: Int) {
+                let index = pending[pendingIndex]
                 let request = job.requests[index]
                 group.addTask {
                     (index, SweepRunner.run(request))
@@ -131,7 +174,7 @@ public enum SweepRunner {
             }
             while let (index, summary) = await group.next() {
                 summaries[index] = summary
-                if next < job.requests.count {
+                if next < pending.count {
                     add(next)
                     next += 1
                 }
@@ -140,8 +183,24 @@ public enum SweepRunner {
         return SweepBatchResult(
             name: job.name,
             elapsedSeconds: Date().timeIntervalSince(started),
-            summaries: summaries.compactMap { $0 }
+            summaries: summaries.compactMap { $0 },
+            resumedRequestCount: resumed,
+            executedRequestCount: pending.count
         )
+    }
+
+    /// Deterministic request identity used by resumable workers. FNV-1a keeps
+    /// the format dependency-free; this is an identity guard, not a security hash.
+    public static func fingerprint(_ request: SweepRequest) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let data = (try? encoder.encode(request)) ?? Data(request.id.utf8)
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in data {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return String(format: "%016llx", hash)
     }
 
     private static func runAnalysis(

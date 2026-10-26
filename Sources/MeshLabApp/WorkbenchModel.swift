@@ -157,6 +157,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     var hasResults: Bool {
+        if designResult != nil { return true }
         switch project.analysis {
         case .staticAnalysis, .thermalStructural, .productionLinear,
              .nonlinearStatic, .coupledThermoMechanical:
@@ -167,6 +168,9 @@ final class WorkbenchModel: ObservableObject {
     }
 
     var resultsCSV: String {
+        if let designResult {
+            return AnalysisResultExport.designCSV(designResult)
+        }
         switch project.analysis {
         case .staticAnalysis:
             guard let result else { return "" }

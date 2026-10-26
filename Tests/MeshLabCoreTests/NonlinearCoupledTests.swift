@@ -117,7 +117,7 @@ private func nonlinearTetra(load: Double, modulus: Double = 1e7) throws -> FEMMo
     #expect(coupled.staticResult.maxDisplacement > uncoupled.maxDisplacement)
 }
 
-@Test func projectVersionSevenRoundTripsAndMigratesVersionSix() throws {
+@Test func nonlinearSettingsRoundTripCurrentSchemaAndMigrateVersionSix() throws {
     var project = try MeshLabProject.cantileverExample()
     project.analysis = .nonlinearStatic
     project.nonlinearOptions.loadSteps = 7
@@ -125,7 +125,7 @@ private func nonlinearTetra(load: Double, modulus: Double = 1e7) throws -> FEMMo
     let data = try MeshLabProjectFile.encode(project)
     let decoded = try MeshLabProjectFile.decode(data)
     #expect(decoded == project)
-    #expect(decoded.schemaVersion == 7)
+    #expect(decoded.schemaVersion == MeshLabProject.currentSchemaVersion)
 
     var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
     object["schemaVersion"] = 6

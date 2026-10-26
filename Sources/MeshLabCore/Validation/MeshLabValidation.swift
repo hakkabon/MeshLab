@@ -73,6 +73,7 @@ public enum MeshLabValidation {
             try linearThermalCase(),
             try meshQualityCase(),
             try finiteStrainSmallLoadCase(),
+            try constrainedDesignCase(),
         ])
     }
 
@@ -270,6 +271,44 @@ public enum MeshLabValidation {
                     observed: nonlinear.equilibrium.relativeFreeResidual,
                     reference: 0,
                     absoluteTolerance: 1e-9
+                ),
+            ]
+        )
+    }
+
+    private static func constrainedDesignCase() throws -> ValidationCase {
+        let project = try MeshLabProject.cantileverExample()
+        let baseline = try StaticAnalysis(options: project.makeAnalysisOptions())
+            .solve(project.makeModel())
+        let result = try ParametricStudy(
+            axes: [ParametricAxis(parameter: .loadScale, values: [0.5, 1, 2])],
+            constraints: [ParametricConstraint(
+                metric: .maxDisplacement,
+                upperBound: baseline.maxDisplacement * 1.1
+            )],
+            paretoObjectives: [.compliance, .maxVonMises]
+        ).solve(project)
+        return ValidationCase(
+            identifier: "constrained-parametric-pareto",
+            category: "design",
+            metrics: [
+                ValidationMetric(
+                    name: "feasible-samples",
+                    observed: Double(result.feasibleSampleCount),
+                    reference: 2,
+                    absoluteTolerance: 0
+                ),
+                ValidationMetric(
+                    name: "pareto-samples",
+                    observed: Double(result.paretoIndices.count),
+                    reference: 1,
+                    absoluteTolerance: 0
+                ),
+                ValidationMetric(
+                    name: "best-index",
+                    observed: Double(result.bestIndex),
+                    reference: 0,
+                    absoluteTolerance: 0
                 ),
             ]
         )

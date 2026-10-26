@@ -123,7 +123,22 @@ production slice:
 - project schema v7, batch execution, workbench execution/inspection, and
   deterministic small-load validation cover both new analysis kinds.
 
-The package has 85 tests covering vector/dense/sparse math, mesh topology and
+P9 (Advanced design and scale) is complete for constrained exploration and
+restartable workers:
+
+- parametric studies accept hard response constraints and compute a deterministic
+  non-dominated front across selected compliance, displacement, and stress
+  objectives;
+- the workbench reports feasible/Pareto sample counts and exports parametric,
+  topology, and shape design results as CSV;
+- sweep summaries carry deterministic request fingerprints, allowing unchanged
+  successes or failures to be resumed while selectively retrying failures;
+- `MeshLabSweep` exposes `--resume` and `--retry-failures`, retains bounded
+  concurrency and request ordering, and reports executed versus resumed counts;
+- project schema v8 defaults the new design settings when loading v1–v7 files,
+  and deterministic validation now includes constrained Pareto exploration.
+
+The package has 91 tests covering vector/dense/sparse math, mesh topology and
 surface extraction, linear-static FEM equilibrium, solver backends and
 factorization reuse, modal/transient dynamics, thermal conduction and thermal
 stress, parametric sweeps, compliance adjoints, topology/shape optimization,
@@ -221,12 +236,16 @@ embeds a complete exported `MeshLabProject` and selects `analysis` or `design`.
 
 ```bash
 swift run -c release MeshLabSweep sweep.json --output results.json --concurrency 8
+swift run -c release MeshLabSweep sweep.json --output next.json \
+  --resume results.json --retry-failures
 swift run -c release MeshLabSweep - < sweep.json > results.json
 ```
 
-The worker exits with status 1 when any request fails. It does not yet provide
-cloud storage, authentication, resumable jobs, or platform-specific GPU
-execution; those remain deployment-layer concerns.
+The worker exits with status 1 when any request fails. Resume reuse is guarded
+by a deterministic fingerprint of the complete request, so edited projects are
+executed again rather than receiving stale summaries. The worker does not yet
+provide mid-request checkpoints, cloud artifact storage, authentication, or
+platform-specific GPU execution; those remain deployment-layer concerns.
 
 ## Benchmarks
 
@@ -273,7 +292,7 @@ the environment it was captured on.
   thermal strain, optional temperature-dependent Young's modulus, relaxation,
   and convergence history.
 - Parametric static sweeps with Cartesian axes and objective-based best-sample
-  selection.
+  selection, hard response constraints, and non-dominated Pareto fronts.
 - Self-adjoint compliance sensitivities and finite-difference-checked gradients.
 - SIMP topology optimization with volume control, filtering, and L-BFGS-B.
 - Discrete shape optimization of selected node coordinates with volume control.
@@ -284,7 +303,7 @@ the environment it was captured on.
 - Optional matrix-free static and thermal-stress solves using an
   element-by-element stiffness operator and Jacobi-preconditioned CG.
 - Batch analyses and design studies through `SweepJob`, `SweepRunner`, and the
-  `MeshLabSweep` JSON worker.
+  resumable/retryable `MeshLabSweep` JSON worker.
 - ASCII Gmsh 2.2/4.1 import for first-order triangles/tetrahedra with explicit
   units and named physical regions; legacy ASCII VTK result export.
 - Deterministic `MeshLabValidate` JSON for cross-version numerical checks.
@@ -306,10 +325,11 @@ the environment it was captured on.
 - Production-linear study execution with case/combination selection, envelope
   peaks, equilibrium diagnostics, and long-form multi-result CSV export.
 - Parametric, topology, and shape design studies with asynchronous runs,
-  summaries, and best-sample/optimized-field rendering.
+  response constraints, Pareto summaries, design CSV export, and
+  best-sample/optimized-field rendering.
 - Solver picker for Accelerate and NumericCore direct/iterative methods, plus
   a matrix-free CG path for static and thermal-structural studies.
-- Versioned JSON project import/export (schema v7, v1–v6 migration), ASCII
+- Versioned JSON project import/export (schema v8, v1–v7 migration), ASCII
   Gmsh mesh import, static/modal/thermal CSV, and legacy VTK result export.
 - Asynchronous solve with progress, cancellation of stale results, and errors.
 - Surface picking resolves the deformed hit point to a source node.
@@ -350,14 +370,15 @@ the environment it was captured on.
 - No document-based autosave or report generation yet.
 - Gmsh import is ASCII-only and limited to linear `triangle3`/`tetrahedron4`;
   binary Gmsh, OBJ/STL/CAD, higher-order elements, and VTU/XDMF are not
-  implemented. Project schema v7 files are not readable by older clients.
+  implemented. Project schema v8 files are not readable by older clients.
 - Design optimization is limited to linear-static compliance with homogeneous
   Dirichlet constraints and no thermal loading.
 - Topology optimization reports densities but does not render a density field;
   shape optimization moves nodes on one selected face and has no
   manufacturability constraints.
-- Design studies do not yet offer per-iteration progress or design-result CSV
-  export.
+- Design studies do not yet offer per-iteration progress. Pareto analysis is
+  exhaustive over the configured Cartesian samples rather than an adaptive or
+  surrogate-based multi-objective optimizer.
 - Matrix-free solves use Jacobi-preconditioned CG and are limited to symmetric
   positive-definite static/thermal-stress systems; modal, transient, and
   topology solves still use assembled matrices.
@@ -368,8 +389,9 @@ the environment it was captured on.
   workbench runs and reviews configured definitions but does not yet edit them.
 - NumericCore's MPS backend is not yet usable, so no GPU numerical path is
   shipped. The matrix-free CPU path is the current scale-out option.
-- Batch sweeps hold the full job and result set in memory and do not yet
-  support resume, retries, artifact storage, or authentication.
+- Batch sweeps hold the full job and result set in memory. Resume operates at
+  request boundaries; there are no mid-analysis checkpoints, artifact storage,
+  remote coordination, or authentication.
 - Rendering lacks clipping, vector glyphs, and time animation.
 - Picking is CPU ray casting and will need a spatial index or GPU picking for
   very large surfaces.
@@ -430,10 +452,13 @@ Scripts/
 - **P8 — Nonlinear and coupled engineering (complete):** incremental
   finite-strain `tet4` statics, NumericCore damped Newton iteration, staggered
   steady thermo-mechanical coupling, schema v7, batch and workbench integration.
-- **P9 — Scale and advanced constitutive physics:** sparse/matrix-free nonlinear
-  tangents, adaptive continuation, hyperelasticity/plasticity/contact,
+- **P9 — Advanced design and scale (complete):** constrained parametric
+  exploration, Pareto fronts, design CSV export, fingerprinted resume/retry,
+  schema v8, workbench summaries, and deterministic validation.
+- **P10 — Advanced constitutive physics and acceleration:** sparse/matrix-free
+  nonlinear tangents, adaptive continuation, hyperelasticity/plasticity/contact,
   monolithic and transient multiphysics, Metal/MPS numerical paths, reusable
-  multi-RHS solves, and resumable cloud workers.
+  multi-RHS solves, distributed artifacts, and mid-request checkpoints.
 
 ## Contributing
 
