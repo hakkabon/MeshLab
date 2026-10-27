@@ -29,6 +29,9 @@ public enum Load: Sendable, Hashable, Codable {
     /// Uniform traction on a triangular face (`nodes` must contain three
     /// distinct node indices). The total force is `traction * area`.
     case traction(nodes: [Int], vector: SIMD3<Double>)
+    /// Uniform pressure on an oriented triangular or quadrilateral face.
+    /// Positive pressure acts opposite the right-hand-rule face normal.
+    case pressure(nodes: [Int], magnitude: Double)
 }
 
 /// A linear-elastic finite-element model.

@@ -42,18 +42,52 @@ public struct ThermalStudy: Sendable, Hashable, Codable {
     public var constraints: [ThermalConstraint]
     public var referenceTemperature: Double
     public var nodalHeat: [ThermalLoad]
+    public var surfaceConditions: [ThermalSurfaceCondition]
     public var volumetricHeat: Double
 
     public init(
         constraints: [ThermalConstraint] = [],
         referenceTemperature: Double = 0,
         nodalHeat: [ThermalLoad] = [],
+        surfaceConditions: [ThermalSurfaceCondition] = [],
         volumetricHeat: Double = 0
     ) {
         self.constraints = constraints
         self.referenceTemperature = referenceTemperature
         self.nodalHeat = nodalHeat
+        self.surfaceConditions = surfaceConditions
         self.volumetricHeat = volumetricHeat
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case constraints, referenceTemperature, nodalHeat, surfaceConditions
+        case volumetricHeat
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            constraints: try container.decodeIfPresent(
+                [ThermalConstraint].self,
+                forKey: .constraints
+            ) ?? [],
+            referenceTemperature: try container.decodeIfPresent(
+                Double.self,
+                forKey: .referenceTemperature
+            ) ?? 0,
+            nodalHeat: try container.decodeIfPresent(
+                [ThermalLoad].self,
+                forKey: .nodalHeat
+            ) ?? [],
+            surfaceConditions: try container.decodeIfPresent(
+                [ThermalSurfaceCondition].self,
+                forKey: .surfaceConditions
+            ) ?? [],
+            volumetricHeat: try container.decodeIfPresent(
+                Double.self,
+                forKey: .volumetricHeat
+            ) ?? 0
+        )
     }
 }
 
@@ -62,7 +96,7 @@ public struct ThermalStudy: Sendable, Hashable, Codable {
 /// The project owns the mesh and analysis definition. Display settings travel
 /// with the document so reopening a project restores the same review state.
 public struct MeshLabProject: Sendable, Equatable, Codable {
-    public static let currentSchemaVersion = 10
+    public static let currentSchemaVersion = 11
 
     public var schemaVersion: Int
     public var name: String
@@ -79,6 +113,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
     public var deformationScale: Float
     public var analysis: AnalysisKind
     public var modalModeCount: Int
+    public var modalSolver: ModalSolverKind
     public var selectedMode: Int
     public var transientStudy: TransientStudy
     public var thermalStudy: ThermalStudy
@@ -108,6 +143,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         deformationScale: Float = 1,
         analysis: AnalysisKind = .staticAnalysis,
         modalModeCount: Int = 6,
+        modalSolver: ModalSolverKind = .automatic,
         selectedMode: Int = 0,
         transientStudy: TransientStudy = TransientStudy(),
         thermalStudy: ThermalStudy = ThermalStudy(),
@@ -137,6 +173,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         self.deformationScale = deformationScale
         self.analysis = analysis
         self.modalModeCount = modalModeCount
+        self.modalSolver = modalSolver
         self.selectedMode = selectedMode
         self.transientStudy = transientStudy
         self.thermalStudy = thermalStudy
@@ -168,6 +205,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         case deformationScale
         case analysis
         case modalModeCount
+        case modalSolver
         case selectedMode
         case transientStudy
         case thermalStudy
@@ -213,6 +251,10 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
             Int.self,
             forKey: .modalModeCount
         ) ?? 6
+        self.modalSolver = try container.decodeIfPresent(
+            ModalSolverKind.self,
+            forKey: .modalSolver
+        ) ?? .automatic
         self.selectedMode = try container.decodeIfPresent(
             Int.self,
             forKey: .selectedMode
@@ -283,6 +325,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
             material: material,
             constraints: thermalStudy.constraints,
             nodalHeat: thermalStudy.nodalHeat,
+            surfaceConditions: thermalStudy.surfaceConditions,
             volumetricHeat: thermalStudy.volumetricHeat
         )
     }

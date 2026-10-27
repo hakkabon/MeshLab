@@ -293,7 +293,8 @@ public enum EngineeringAssessment {
 
         case .modal:
             let value = try ModalAnalysis(options: ModalOptions(
-                modeCount: project.modalModeCount
+                modeCount: project.modalModeCount,
+                solver: project.modalSolver
             )).solve(project.makeModel())
             return EngineeringResultSummary(
                 maximumDisplacement: nil,

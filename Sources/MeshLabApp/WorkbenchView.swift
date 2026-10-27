@@ -149,6 +149,11 @@ struct WorkbenchView: View {
                         ),
                         in: 1...50
                     )
+                    Picker("Modal solver", selection: $model.project.modalSolver) {
+                        ForEach(ModalSolverKind.allCases, id: \.self) { solver in
+                            Text(solver.title).tag(solver)
+                        }
+                    }
                 }
                 if model.project.analysis == .transient {
                     LabeledContent("Time step (s)") {
@@ -1356,6 +1361,8 @@ struct WorkbenchView: View {
             switch load {
             case .nodal(_, let vector), .traction(_, let vector):
                 return total + simd_length(vector) * model.project.loadScale
+            case .pressure(_, let magnitude):
+                return total + abs(magnitude) * model.project.loadScale
             }
         }
     }
@@ -1430,6 +1437,16 @@ private extension AnalysisKind {
         case .modal: return "Modal"
         case .transient: return "Transient dynamics"
         case .thermalStructural: return "Thermal structural"
+        }
+    }
+}
+
+private extension ModalSolverKind {
+    var title: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .dense: return "Dense LAPACK"
+        case .sparseSubspace: return "Sparse subspace"
         }
     }
 }

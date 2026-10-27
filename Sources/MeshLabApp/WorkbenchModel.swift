@@ -928,7 +928,8 @@ final class WorkbenchModel: ObservableObject {
 
         case .modal:
             let result = try ModalAnalysis(options: ModalOptions(
-                modeCount: project.modalModeCount
+                modeCount: project.modalModeCount,
+                solver: project.modalSolver
             )).solve(project.makeModel())
             return .modal(result)
 
@@ -1065,6 +1066,7 @@ private extension MeshLabProject {
             && matrixFreeOptions == other.matrixFreeOptions
             && analysis == other.analysis
             && modalModeCount == other.modalModeCount
+            && modalSolver == other.modalSolver
             && transientStudy == other.transientStudy
             && thermalStudy == other.thermalStudy
             && linearStudy == other.linearStudy

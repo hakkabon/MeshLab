@@ -121,6 +121,8 @@ private extension Load {
             .nodal(node: node, vector: vector * factor)
         case .traction(let nodes, let vector):
             .traction(nodes: nodes, vector: vector * factor)
+        case .pressure(let nodes, let magnitude):
+            .pressure(nodes: nodes, magnitude: magnitude * factor)
         }
     }
 }

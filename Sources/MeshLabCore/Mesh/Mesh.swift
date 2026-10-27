@@ -3,18 +3,22 @@ import simd
 
 public enum ElementType: String, Sendable, Hashable, Codable {
     case tetrahedron4
+    case tetrahedron10
+    case hexahedron8
     case triangle3
 
     public var nodeCount: Int {
         switch self {
         case .tetrahedron4: return 4
+        case .tetrahedron10: return 10
+        case .hexahedron8: return 8
         case .triangle3: return 3
         }
     }
 
     public var dimension: Int {
         switch self {
-        case .tetrahedron4: return 3
+        case .tetrahedron4, .tetrahedron10, .hexahedron8: return 3
         case .triangle3: return 2
         }
     }
@@ -28,8 +32,32 @@ public enum ElementType: String, Sendable, Hashable, Codable {
                 [0, 2, 3],
                 [1, 2, 3],
             ]
+        case .tetrahedron10:
+            return [
+                [0, 1, 2, 4, 5, 6],
+                [0, 1, 3, 4, 8, 7],
+                [0, 2, 3, 6, 9, 7],
+                [1, 2, 3, 5, 9, 8],
+            ]
+        case .hexahedron8:
+            return [
+                [0, 1, 2, 3], [4, 5, 6, 7],
+                [0, 1, 5, 4], [1, 2, 6, 5],
+                [2, 3, 7, 6], [3, 0, 4, 7],
+            ]
         case .triangle3:
             return [[0, 1, 2]]
+        }
+    }
+
+    public func surfaceTriangles(forFace face: Int) -> [[Int]] {
+        switch self {
+        case .tetrahedron4, .triangle3:
+            return [[0, 1, 2]]
+        case .tetrahedron10:
+            return [[0, 3, 5], [3, 1, 4], [5, 4, 2], [3, 4, 5]]
+        case .hexahedron8:
+            return [[0, 1, 2], [0, 2, 3]]
         }
     }
 }
@@ -181,35 +209,45 @@ public struct Mesh: Sendable, Codable, Equatable {
         for element in elements {
             let nodeIndices = element.nodes
             let coordinates = nodeIndices.map { nodes[$0] }
-            let elementCenter = coordinates.reduce(SIMD3<Double>.zero, +) / 4
+            let elementCenter = coordinates.reduce(SIMD3<Double>.zero, +)
+                / Double(coordinates.count)
 
-            for face in ElementType.tetrahedron4.faces {
-                var first = nodeIndices[face[0]]
-                var second = nodeIndices[face[1]]
-                let third = nodeIndices[face[2]]
-
-                let p0 = nodes[first]
-                let p1 = nodes[second]
-                let p2 = nodes[third]
-                let faceCenter = (p0 + p1 + p2) / 3
-                let normal = simd_cross(p1 - p0, p2 - p0)
-                if simd_dot(normal, faceCenter - elementCenter) < 0 {
-                    swap(&first, &second)
+            for (faceIndex, face) in element.type.faces.enumerated() {
+                let faceNodes = face.map { nodeIndices[$0] }
+                var triangles = element.type.surfaceTriangles(forFace: faceIndex).map {
+                    $0.map { faceNodes[$0] }
                 }
-
-                let key = [first, second, third].sorted()
+                let faceCenter = faceNodes.map { nodes[$0] }
+                    .reduce(SIMD3<Double>.zero, +) / Double(faceNodes.count)
+                if let triangle = triangles.first {
+                    let normal = simd_cross(
+                        nodes[triangle[1]] - nodes[triangle[0]],
+                        nodes[triangle[2]] - nodes[triangle[0]]
+                    )
+                    if simd_dot(normal, faceCenter - elementCenter) < 0 {
+                        triangles = triangles.map { [$0[1], $0[0], $0[2]] }
+                    }
+                }
+                let key = faceNodes.sorted()
                 if var record = records[key] {
                     record.count += 1
                     records[key] = record
                 } else {
-                    records[key] = FaceRecord(count: 1, oriented: [first, second, third])
+                    records[key] = FaceRecord(
+                        count: 1,
+                        oriented: triangles.flatMap { $0 }
+                    )
                 }
             }
         }
 
         let boundary = records.values
             .filter { $0.count == 1 }
-            .map(\.oriented)
+            .flatMap { record in
+                stride(from: 0, to: record.oriented.count, by: 3).map {
+                    Array(record.oriented[$0..<($0 + 3)])
+                }
+            }
 
         return try SurfaceMesh(
             faces: boundary,
@@ -248,7 +286,7 @@ public struct Mesh: Sendable, Codable, Equatable {
         coordinates: [SIMD3<Double>]
     ) throws -> Double {
         switch type {
-        case .tetrahedron4:
+        case .tetrahedron4, .tetrahedron10:
             let a = coordinates[1] - coordinates[0]
             let b = coordinates[2] - coordinates[0]
             let c = coordinates[3] - coordinates[0]
@@ -257,6 +295,8 @@ public struct Mesh: Sendable, Codable, Equatable {
             let a = coordinates[1] - coordinates[0]
             let b = coordinates[2] - coordinates[0]
             return 0.5 * abs(a.x * b.y - a.y * b.x)
+        case .hexahedron8:
+            return abs(hexCenterDeterminant(coordinates)) * 8
         }
     }
 
@@ -265,7 +305,7 @@ public struct Mesh: Sendable, Codable, Equatable {
         coordinates: [SIMD3<Double>]
     ) -> Double {
         switch type {
-        case .tetrahedron4:
+        case .tetrahedron4, .tetrahedron10:
             let edges = [
                 coordinates[1] - coordinates[0],
                 coordinates[2] - coordinates[0],
@@ -290,7 +330,33 @@ public struct Mesh: Sendable, Codable, Equatable {
             guard scale.isFinite, scale > 0 else { return 0 }
             let twiceArea = abs(first.x * second.y - first.y * second.x)
             return twiceArea / (scale * scale)
+        case .hexahedron8:
+            let edges = [
+                (0, 1), (1, 2), (2, 3), (3, 0),
+                (4, 5), (5, 6), (6, 7), (7, 4),
+                (0, 4), (1, 5), (2, 6), (3, 7),
+            ].map { coordinates[$0.1] - coordinates[$0.0] }
+            let scale = edges.map(simd_length).max() ?? 0
+            guard scale.isFinite, scale > 0 else { return 0 }
+            return abs(hexCenterDeterminant(coordinates)) / pow(scale / 2, 3)
         }
+    }
+
+    static func hexCenterDeterminant(_ coordinates: [SIMD3<Double>]) -> Double {
+        let signs = [
+            SIMD3<Double>(-1, -1, -1), SIMD3<Double>(1, -1, -1),
+            SIMD3<Double>(1, 1, -1), SIMD3<Double>(-1, 1, -1),
+            SIMD3<Double>(-1, -1, 1), SIMD3<Double>(1, -1, 1),
+            SIMD3<Double>(1, 1, 1), SIMD3<Double>(-1, 1, 1),
+        ]
+        var jacobian = simd_double3x3(columns: (.zero, .zero, .zero))
+        for index in 0..<8 {
+            let gradient = signs[index] / 8
+            jacobian.columns.0 += coordinates[index] * gradient.x
+            jacobian.columns.1 += coordinates[index] * gradient.y
+            jacobian.columns.2 += coordinates[index] * gradient.z
+        }
+        return jacobian.determinant
     }
 }
 

@@ -133,9 +133,9 @@ enum FEMAssembly {
                 elementIndex: elementIndex
             )
             let element = model.mesh.elements[elementIndex]
-            let nodeForce = material.density * data.measure
-                / Double(element.nodes.count)
-            for node in element.nodes {
+            let nodalWeights = data.nodalMeasureWeights()
+            for (localNode, node) in element.nodes.enumerated() {
+                let nodeForce = material.density * nodalWeights[localNode]
                 for axis in 0..<dimension {
                     rightHandSide[node * dimension + axis] += nodeForce
                         * model.bodyForce[axis]
@@ -196,6 +196,37 @@ enum FEMAssembly {
                     rightHandSide[base] += force.x
                     rightHandSide[base + 1] += force.y
                     rightHandSide[base + 2] += force.z
+                }
+
+            case .pressure(let nodes, let magnitude):
+                guard dimension == 3 else {
+                    throw FEMError.invalidLoad("Pressure loads require a 3D mesh")
+                }
+                guard (nodes.count == 3 || nodes.count == 4),
+                      Set(nodes).count == nodes.count,
+                      nodes.allSatisfy({ model.mesh.nodes.indices.contains($0) }),
+                      magnitude.isFinite else {
+                    throw FEMError.invalidLoad(
+                        "Pressure requires three or four distinct valid face nodes"
+                    )
+                }
+                let origin = model.mesh.nodes[nodes[0]]
+                var areaVector = SIMD3<Double>.zero
+                for index in 1..<(nodes.count - 1) {
+                    areaVector += 0.5 * simd_cross(
+                        model.mesh.nodes[nodes[index]] - origin,
+                        model.mesh.nodes[nodes[index + 1]] - origin
+                    )
+                }
+                guard simd_length(areaVector) > 1e-15 else {
+                    throw FEMError.invalidLoad("Pressure face is degenerate")
+                }
+                let nodalForce = -magnitude * areaVector / Double(nodes.count)
+                for node in nodes {
+                    let base = node * dimension
+                    rightHandSide[base] += nodalForce.x
+                    rightHandSide[base + 1] += nodalForce.y
+                    rightHandSide[base + 2] += nodalForce.z
                 }
             }
         }
@@ -312,9 +343,11 @@ enum FEMAssembly {
             guard expansion.isFinite, expansion >= 0 else {
                 throw FEMError.invalidModel("Material thermal expansion is invalid")
             }
-            let change = data.nodeIndices.reduce(0.0) {
-                $0 + model.temperatureChange[$1]
-            } / Double(data.nodeIndices.count)
+            let nodalWeights = data.nodalMeasureWeights()
+            let change = data.nodeIndices.indices.reduce(0.0) {
+                $0 + model.temperatureChange[data.nodeIndices[$1]]
+                    * nodalWeights[$1] / data.measure
+            }
             var strain = [Double](repeating: 0, count: data.strainCount)
             for axis in 0..<model.mesh.dimension {
                 strain[axis] = expansion * change
@@ -322,17 +355,9 @@ enum FEMAssembly {
             strains.append(strain)
 
             let dofs = model.elementDOFs(data.elementIndex)
+            let local = data.equivalentInitialStrainLoad(strain)
             for row in 0..<data.dofCount {
-                var sum = 0.0
-                for strainIndex in 0..<data.strainCount {
-                    var db = 0.0
-                    for column in 0..<data.strainCount {
-                        db += data.constitutive[strainIndex * data.strainCount + column]
-                            * strain[column]
-                    }
-                    sum += data.bMatrix[strainIndex * data.dofCount + row] * db
-                }
-                loads[dofs[row]] += data.measure * sum
+                loads[dofs[row]] += local[row]
             }
         }
         return (loads, strains)

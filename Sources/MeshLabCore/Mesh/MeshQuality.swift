@@ -28,7 +28,7 @@ public extension Mesh {
             let coordinates = elementCoordinates(index)
             let element = elements[index]
             switch element.type {
-            case .tetrahedron4:
+            case .tetrahedron4, .tetrahedron10:
                 let first = coordinates[1] - coordinates[0]
                 let second = coordinates[2] - coordinates[0]
                 let third = coordinates[3] - coordinates[0]
@@ -65,6 +65,23 @@ public extension Mesh {
                     measure: abs(signedTwiceArea) / 2,
                     quality: quality,
                     isInverted: signedTwiceArea < 0
+                )
+            case .hexahedron8:
+                let signedDeterminant = Mesh.hexCenterDeterminant(coordinates)
+                let edges = [
+                    (0, 1), (1, 2), (2, 3), (3, 0),
+                    (4, 5), (5, 6), (6, 7), (7, 4),
+                    (0, 4), (1, 5), (2, 6), (3, 7),
+                ].map { coordinates[$0.1] - coordinates[$0.0] }
+                let scale = edges.map(simd_length).max() ?? 0
+                let quality = scale > 0
+                    ? abs(signedDeterminant) / pow(scale / 2, 3)
+                    : 0
+                return ElementQuality(
+                    elementIndex: index,
+                    measure: abs(signedDeterminant) * 8,
+                    quality: quality,
+                    isInverted: signedDeterminant < 0
                 )
             }
         }

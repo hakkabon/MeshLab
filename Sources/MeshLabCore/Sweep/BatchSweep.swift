@@ -252,7 +252,8 @@ public enum SweepRunner {
 
         case .modal:
             let result = try ModalAnalysis(options: ModalOptions(
-                modeCount: project.modalModeCount
+                modeCount: project.modalModeCount,
+                solver: project.modalSolver
             )).solve(project.makeModel())
             modeCount = result.modes.count
             strainEnergy = nil

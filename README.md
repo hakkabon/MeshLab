@@ -44,7 +44,7 @@ P2 (Product slice) is complete:
 P3 (Dynamics and multiphysics) is complete for 3D modal, transient, and
 steady thermal-structural analysis:
 
-- tet4/tri3 consistent mass matrices and 3D/2D steady-conduction matrices;
+- continuum consistent mass matrices and 3D/2D steady-conduction matrices;
 - constrained generalized modal analysis with mass-normalized mode shapes;
 - average-acceleration Newmark transient dynamics with Rayleigh damping;
 - steady thermal analysis with Dirichlet temperatures, nodal heat, volumetric
@@ -173,7 +173,25 @@ released NumericCore boundary:
   combinations, while upstream operator/Krylov and sparse-modal contracts are
   specified for future NumericCore releases.
 
-The package has 103 tests covering vector/dense/sparse math, mesh topology and
+P11A (element breadth and engineering interoperability) is complete as the
+next production-foundation increment:
+
+- isoparametric `tet10` and `hex8` solids use Gaussian integration for
+  stiffness, consistent mass, thermal conduction, body force, thermal strain,
+  stress recovery, quality checks, and boundary extraction;
+- oriented triangle/quad pressure, convection, and nonlinear grey-body
+  radiation conditions extend mechanical and thermal boundary physics;
+- sparse subspace iteration provides a reusable-factorization modal path, with
+  dense/sparse/automatic selection persisted in schema v11 projects;
+- planar Euler-Bernoulli frame and embedded triangular membrane-shell kernels
+  establish an arbitrary-DOF structural assembly seam (shell bending remains a
+  later formulation);
+- Gmsh imports `hex8`/`tet10` and higher-order boundary regions, while VTU and
+  inline XDMF export modern visualization data;
+- mesh-convergence studies report observed order, Richardson extrapolation,
+  and estimated relative discretization error.
+
+The package has 113 tests covering vector/dense/sparse math, mesh topology and
 surface extraction, linear-static FEM equilibrium, solver backends and
 factorization reuse, modal/transient dynamics, thermal conduction and thermal
 stress, parametric sweeps, compliance adjoints, topology/shape optimization,
@@ -288,7 +306,7 @@ platform-specific GPU execution; those remain deployment-layer concerns.
 ## Engineering qualification
 
 `MeshLabReport` evaluates the analysis selected by a project and applies its
-schema-v10 `engineeringRequirements`. The JSON artifact is deterministic: it
+schema-v11 `engineeringRequirements`. The JSON artifact is deterministic: it
 does not include a wall-clock timestamp or host-specific data, so it can be
 reviewed in source control and compared across Swift-NumericCore and
 Rust-NumericCore releases.
@@ -391,7 +409,7 @@ the environment it was captured on.
   pass/fail status.
 - Solver picker for Accelerate and NumericCore direct/iterative methods, plus
   a matrix-free CG path for static and thermal-structural studies.
-- Versioned JSON project import/export (schema v10, v1–v9 migration), ASCII
+- Versioned JSON project import/export (schema v11, v1–v10 migration), ASCII
   Gmsh mesh import, static/modal/thermal CSV, and legacy VTK result export.
 - Asynchronous solve with progress, cancellation of stale results, and errors.
 - Surface picking resolves the deformed hit point to a source node.
@@ -434,7 +452,7 @@ the environment it was captured on.
   qualification reports are deterministic JSON and Markdown.
 - Gmsh import is ASCII-only and limited to linear `triangle3`/`tetrahedron4`;
   binary Gmsh, OBJ/STL/CAD, higher-order elements, and VTU/XDMF are not
-  implemented. Project schema v10 files are not readable by older clients.
+  implemented. Project schema v11 files are not readable by older clients.
 - Design optimization is limited to linear-static compliance with homogeneous
   Dirichlet constraints and no thermal loading.
 - Topology optimization reports densities but does not render a density field;
@@ -531,6 +549,10 @@ Scripts/
   provenance, committed validation corpus, factorization/multi-RHS reuse,
   schema-v10 unit and transient definitions, public element state/tangent seam,
   transient workbench inspection, and basic production-study authoring.
+- **P11A — Element breadth and interoperability (complete):** integrated
+  `tet10`/`hex8` solids, frame and membrane-shell kernels, pressure and thermal
+  surface exchange, sparse modal extraction, VTU/XDMF and richer Gmsh support,
+  mesh-convergence estimation, and schema-v11 analysis settings.
 - **P11 — Advanced constitutive physics and acceleration:** sparse/matrix-free
   nonlinear tangents, released NumericCore operator/Krylov and sparse-modal APIs,
   adaptive continuation, hyperelasticity/plasticity/contact, monolithic and

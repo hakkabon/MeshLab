@@ -91,34 +91,10 @@ public struct LinearContinuumElementKernel: FEMElementKernel {
             localDisplacement: request.localDisplacement,
             initialStrain: request.initialStrain
         ).map { $0 * request.stiffnessScale }
-        var elasticStrain = [Double](repeating: 0, count: data.strainCount)
-        for component in 0..<data.strainCount {
-            for localDOF in 0..<data.dofCount {
-                elasticStrain[component] += data.bMatrix[
-                    component * data.dofCount + localDOF
-                ] * request.localDisplacement[localDOF]
-            }
-            if !request.initialStrain.isEmpty {
-                elasticStrain[component] -= request.initialStrain[component]
-            }
-        }
-        var conjugateStress = [Double](repeating: 0, count: data.strainCount)
-        for row in 0..<data.strainCount {
-            for column in 0..<data.strainCount {
-                conjugateStress[row] += data.constitutive[
-                    row * data.strainCount + column
-                ] * elasticStrain[column] * request.stiffnessScale
-            }
-        }
-        var internalForce = [Double](repeating: 0, count: data.dofCount)
-        for localDOF in 0..<data.dofCount {
-            var value = 0.0
-            for component in 0..<data.strainCount {
-                value += data.bMatrix[component * data.dofCount + localDOF]
-                    * conjugateStress[component]
-            }
-            internalForce[localDOF] = data.measure * value
-        }
+        let internalForce = data.internalForce(
+            localDisplacement: request.localDisplacement,
+            initialStrain: request.initialStrain
+        ).map { $0 * request.stiffnessScale }
         let element = request.mesh.elements[request.elementIndex]
         let dimension = request.mesh.dimension
         let dofs = element.nodes.flatMap { node in

@@ -121,7 +121,8 @@ public enum GmshImportError: Error, Equatable, Sendable {
 
 /// Imports ASCII Gmsh 2.2 and 4.1 files.
 ///
-/// Linear triangle (type 2) and tetrahedron (type 4) elements are supported.
+/// Linear triangle (type 2), tetrahedron (type 4), hexahedron (type 5), and
+/// quadratic tetrahedron (type 11) elements are supported.
 /// When a file contains both boundary triangles and tetrahedra, the highest
 /// dimensional elements become the analysis mesh and lower-dimensional
 /// physical groups remain available as named node regions.
@@ -173,6 +174,7 @@ public enum GmshImporter {
     private struct ParsedElement {
         let identifier: Int
         let dimension: Int
+        let type: ElementType?
         let nodes: [Int]
         let physicalTags: [Int]
     }
@@ -241,9 +243,13 @@ public enum GmshImporter {
             guard values.count >= 3 + tagCount else {
                 throw GmshImportError.malformedSection("Elements")
             }
-            let element: (dimension: Int, nodeCount: Int)? = switch type {
-            case 2: (2, 3)
-            case 4: (3, 4)
+            let element: (dimension: Int, nodeCount: Int, type: ElementType?)? = switch type {
+            case 2: (2, 3, .triangle3)
+            case 3: (2, 4, nil) // boundary quadrilateral retained as a region
+            case 4: (3, 4, .tetrahedron4)
+            case 5: (3, 8, .hexahedron8)
+            case 9: (2, 6, nil) // quadratic boundary triangle retained as a region
+            case 11: (3, 10, .tetrahedron10)
             default: nil
             }
             guard let element else { continue }
@@ -255,6 +261,7 @@ public enum GmshImporter {
             elements.append(ParsedElement(
                 identifier: values[0],
                 dimension: element.dimension,
+                type: element.type,
                 nodes: Array(values[nodeStart..<(nodeStart + element.nodeCount)]),
                 physicalTags: physical
             ))
@@ -328,9 +335,13 @@ public enum GmshImporter {
             let entityTag = block[1]
             let elementType = block[2]
             let count = block[3]
-            let nodeCount: Int? = switch elementType {
-            case 2: 3
-            case 4: 4
+            let description: (nodeCount: Int, type: ElementType?)? = switch elementType {
+            case 2: (3, .triangle3)
+            case 3: (4, nil)
+            case 4: (4, .tetrahedron4)
+            case 5: (8, .hexahedron8)
+            case 9: (6, nil)
+            case 11: (10, .tetrahedron10)
             default: nil
             }
             for _ in 0..<count {
@@ -339,14 +350,15 @@ public enum GmshImporter {
                 }
                 let values = lines[lineIndex].split(whereSeparator: { $0.isWhitespace }).compactMap { Int($0) }
                 lineIndex += 1
-                guard let nodeCount else { continue }
-                guard values.count >= nodeCount + 1 else {
+                guard let description else { continue }
+                guard values.count >= description.nodeCount + 1 else {
                     throw GmshImportError.malformedSection("Elements")
                 }
                 elements.append(ParsedElement(
                     identifier: values[0],
                     dimension: dimension,
-                    nodes: Array(values[1...(nodeCount)]),
+                    type: description.type,
+                    nodes: Array(values[1...description.nodeCount]),
                     physicalTags: entityPhysicalTags[PhysicalKey(
                         dimension: dimension,
                         tag: entityTag
@@ -392,7 +404,7 @@ public enum GmshImporter {
         guard let dimension = parsed.elements.map(\.dimension).max(), dimension >= 2 else {
             throw GmshImportError.noSupportedElements
         }
-        let selected = parsed.elements.filter { $0.dimension == dimension }
+        let selected = parsed.elements.filter { $0.dimension == dimension && $0.type != nil }
         guard !selected.isEmpty else { throw GmshImportError.noSupportedElements }
         let usedTags = Set(selected.flatMap(\.nodes))
         let orderedTags = usedTags.sorted()
@@ -412,7 +424,7 @@ public enum GmshImporter {
                 return value
             }
             return Element(
-                type: dimension == 3 ? .tetrahedron4 : .triangle3,
+                type: source.type!,
                 nodes: nodes
             )
         }
@@ -493,9 +505,7 @@ public enum VTKLegacyExporter {
             "\(element.nodes.count) " + element.nodes.map(String.init).joined(separator: " ")
         })
         lines.append("CELL_TYPES \(mesh.elements.count)")
-        lines.append(contentsOf: mesh.elements.map {
-            $0.type == .tetrahedron4 ? "10" : "5"
-        })
+        lines.append(contentsOf: mesh.elements.map { String($0.type.vtkCellType) })
         if let result {
             lines.append("POINT_DATA \(mesh.nodes.count)")
             lines.append("VECTORS displacement double")
@@ -505,5 +515,112 @@ public enum VTKLegacyExporter {
             lines.append(contentsOf: result.nodalVonMises.map { String($0) })
         }
         return lines.joined(separator: "\n") + "\n"
+    }
+}
+
+private extension ElementType {
+    var vtkCellType: Int {
+        switch self {
+        case .triangle3: 5
+        case .tetrahedron4: 10
+        case .hexahedron8: 12
+        case .tetrahedron10: 24
+        }
+    }
+
+    var xdmfTopologyType: String {
+        switch self {
+        case .triangle3: "Triangle"
+        case .tetrahedron4: "Tetrahedron"
+        case .hexahedron8: "Hexahedron"
+        case .tetrahedron10: "Tet_10"
+        }
+    }
+}
+
+/// XML VTK unstructured-grid export suitable for ParaView and modern VTK
+/// consumers. Data arrays use portable inline ASCII so files remain easy to
+/// inspect and require no companion binary payload.
+public enum VTUExporter {
+    public static func data(mesh: Mesh, result: StaticResult? = nil) -> Data {
+        Data(string(mesh: mesh, result: result).utf8)
+    }
+
+    public static func string(mesh: Mesh, result: StaticResult? = nil) -> String {
+        let connectivity = mesh.elements.flatMap(\.nodes).map(String.init).joined(separator: " ")
+        var offset = 0
+        let offsets = mesh.elements.map { element -> String in
+            offset += element.nodes.count
+            return String(offset)
+        }.joined(separator: " ")
+        let types = mesh.elements.map { String($0.type.vtkCellType) }.joined(separator: " ")
+        let points = mesh.nodes.flatMap { [$0.x, $0.y, $0.z] }.map { String($0) }.joined(separator: " ")
+        var pointData = ""
+        if let result {
+            let displacement = result.displacements
+                .flatMap { [$0.x, $0.y, $0.z] }.map { String($0) }.joined(separator: " ")
+            let stress = result.nodalVonMises.map { String($0) }.joined(separator: " ")
+            pointData = """
+                <PointData>
+                  <DataArray type="Float64" Name="displacement" NumberOfComponents="3" format="ascii">\(displacement)</DataArray>
+                  <DataArray type="Float64" Name="von_mises" NumberOfComponents="1" format="ascii">\(stress)</DataArray>
+                </PointData>
+            """
+        }
+        return """
+        <?xml version="1.0"?>
+        <VTKFile type="UnstructuredGrid" version="1.0" byte_order="LittleEndian">
+          <UnstructuredGrid>
+            <Piece NumberOfPoints="\(mesh.nodes.count)" NumberOfCells="\(mesh.elements.count)">
+              \(pointData)
+              <Points><DataArray type="Float64" NumberOfComponents="3" format="ascii">\(points)</DataArray></Points>
+              <Cells>
+                <DataArray type="Int64" Name="connectivity" format="ascii">\(connectivity)</DataArray>
+                <DataArray type="Int64" Name="offsets" format="ascii">\(offsets)</DataArray>
+                <DataArray type="UInt8" Name="types" format="ascii">\(types)</DataArray>
+              </Cells>
+            </Piece>
+          </UnstructuredGrid>
+        </VTKFile>
+        """
+    }
+}
+
+public enum XDMFExportError: Error, Equatable, Sendable {
+    case mixedElementTypes
+}
+
+/// Self-contained XDMF 3 export using inline XML arrays. Homogeneous element
+/// topology is required; multi-grid XDMF can be layered on this API later.
+public enum XDMFExporter {
+    public static func data(mesh: Mesh, result: StaticResult? = nil) throws -> Data {
+        Data(try string(mesh: mesh, result: result).utf8)
+    }
+
+    public static func string(mesh: Mesh, result: StaticResult? = nil) throws -> String {
+        guard let type = mesh.elements.first?.type,
+              mesh.elements.allSatisfy({ $0.type == type }) else {
+            throw XDMFExportError.mixedElementTypes
+        }
+        let topology = mesh.elements.flatMap(\.nodes).map(String.init).joined(separator: " ")
+        let geometry = mesh.nodes.flatMap { [$0.x, $0.y, $0.z] }.map { String($0) }.joined(separator: " ")
+        var attributes = ""
+        if let result {
+            let displacement = result.displacements
+                .flatMap { [$0.x, $0.y, $0.z] }.map { String($0) }.joined(separator: " ")
+            let stress = result.nodalVonMises.map { String($0) }.joined(separator: " ")
+            attributes = """
+              <Attribute Name="displacement" AttributeType="Vector" Center="Node"><DataItem Dimensions="\(mesh.nodes.count) 3" NumberType="Float" Precision="8" Format="XML">\(displacement)</DataItem></Attribute>
+              <Attribute Name="von_mises" AttributeType="Scalar" Center="Node"><DataItem Dimensions="\(mesh.nodes.count)" NumberType="Float" Precision="8" Format="XML">\(stress)</DataItem></Attribute>
+            """
+        }
+        return """
+        <?xml version="1.0"?>
+        <Xdmf Version="3.0"><Domain><Grid Name="MeshLab" GridType="Uniform">
+          <Topology TopologyType="\(type.xdmfTopologyType)" NumberOfElements="\(mesh.elements.count)"><DataItem Dimensions="\(mesh.elements.count) \(type.nodeCount)" NumberType="Int" Format="XML">\(topology)</DataItem></Topology>
+          <Geometry GeometryType="XYZ"><DataItem Dimensions="\(mesh.nodes.count) 3" NumberType="Float" Precision="8" Format="XML">\(geometry)</DataItem></Geometry>
+          \(attributes)
+        </Grid></Domain></Xdmf>
+        """
     }
 }

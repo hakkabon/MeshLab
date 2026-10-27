@@ -1,12 +1,29 @@
 import Foundation
 import simd
 
+public enum ModalSolverKind: String, Sendable, Hashable, Codable, CaseIterable {
+    case automatic
+    case dense
+    case sparseSubspace = "sparse-subspace"
+}
+
 public struct ModalOptions: Sendable, Hashable {
     /// Number of lowest flexible modes to compute.
     public var modeCount: Int
+    public var solver: ModalSolverKind
+    public var maximumIterations: Int
+    public var relativeTolerance: Double
 
-    public init(modeCount: Int = 6) {
+    public init(
+        modeCount: Int = 6,
+        solver: ModalSolverKind = .automatic,
+        maximumIterations: Int = 80,
+        relativeTolerance: Double = 1e-8
+    ) {
         self.modeCount = modeCount
+        self.solver = solver
+        self.maximumIterations = maximumIterations
+        self.relativeTolerance = relativeTolerance
     }
 }
 
@@ -57,10 +74,8 @@ public struct ModalResult: Sendable {
 
 /// Solves the constrained generalized eigenproblem `K φ = λ M φ`.
 ///
-/// The reduced problem is dense and handled by LAPACK's symmetric generalized
-/// eigensolver. This is intended for the current tet4/tri3 product meshes;
-/// large-scale sparse modal analysis can replace the dense step behind this
-/// API later.
+/// Small reduced problems use LAPACK's symmetric generalized eigensolver;
+/// larger problems can use reusable-factorization sparse subspace iteration.
 public struct ModalAnalysis: Sendable {
     public var options: ModalOptions
 
@@ -72,7 +87,10 @@ public struct ModalAnalysis: Sendable {
         guard !model.constraints.isEmpty else {
             throw FEMError.invalidModel("At least one Dirichlet constraint is required")
         }
-        guard options.modeCount > 0 else {
+        guard options.modeCount > 0,
+              options.maximumIterations > 0,
+              options.relativeTolerance.isFinite,
+              options.relativeTolerance > 0 else {
             throw FEMError.invalidModel("Mode count must be positive")
         }
         guard model.constraints.allSatisfy({ $0.value == 0 }) else {
@@ -113,15 +131,29 @@ public struct ModalAnalysis: Sendable {
         )
         let reducedMass = try FEMAssembly.reduced(mass, freeDOFs: free)
 
-        let denseStiffness = denseValues(reducedStiffness)
-        let denseMass = denseValues(reducedMass)
         let eigen: (eigenvalues: [Double], eigenvectors: [[Double]])
         do {
-            eigen = try SymmetricGeneralizedEigenSolver.solve(
-                stiffness: denseStiffness,
-                mass: denseMass,
-                size: free.count
-            )
+            let solver = options.solver == .automatic
+                ? (free.count > 256 ? .sparseSubspace : .dense)
+                : options.solver
+            switch solver {
+            case .automatic:
+                preconditionFailure("automatic modal solver must resolve before execution")
+            case .dense:
+                eigen = try SymmetricGeneralizedEigenSolver.solve(
+                    stiffness: denseValues(reducedStiffness),
+                    mass: denseValues(reducedMass),
+                    size: free.count
+                )
+            case .sparseSubspace:
+                eigen = try SparseGeneralizedEigenSolver.solve(
+                    stiffness: reducedStiffness,
+                    mass: reducedMass,
+                    modeCount: options.modeCount,
+                    maximumIterations: options.maximumIterations,
+                    relativeTolerance: options.relativeTolerance
+                )
+            }
         } catch {
             throw FEMError.solverFailure(
                 "Modal eigensolver failed: \(error)"

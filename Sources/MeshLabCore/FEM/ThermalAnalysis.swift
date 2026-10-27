@@ -22,12 +22,28 @@ public struct ThermalLoad: Sendable, Hashable, Codable {
     }
 }
 
-/// A steady heat-conduction model on a tet4 or tri3 mesh.
+public enum ThermalSurfaceCondition: Sendable, Hashable, Codable {
+    /// `q = h (T - ambientTemperature)` on an oriented or unoriented face.
+    case convection(
+        nodes: [Int],
+        coefficient: Double,
+        ambientTemperature: Double
+    )
+    /// Grey-body radiation linearized during the steady nonlinear iteration.
+    case radiation(
+        nodes: [Int],
+        emissivity: Double,
+        ambientTemperature: Double
+    )
+}
+
+/// A steady heat-conduction model on a supported continuum mesh.
 public struct ThermalModel: Sendable {
     public var mesh: Mesh
     public var material: ElasticMaterial
     public var constraints: [ThermalConstraint]
     public var nodalHeat: [ThermalLoad]
+    public var surfaceConditions: [ThermalSurfaceCondition]
     /// Volumetric heat generation in W/m³.
     public var volumetricHeat: Double
 
@@ -36,12 +52,14 @@ public struct ThermalModel: Sendable {
         material: ElasticMaterial,
         constraints: [ThermalConstraint],
         nodalHeat: [ThermalLoad] = [],
+        surfaceConditions: [ThermalSurfaceCondition] = [],
         volumetricHeat: Double = 0
     ) {
         self.mesh = mesh
         self.material = material
         self.constraints = constraints
         self.nodalHeat = nodalHeat
+        self.surfaceConditions = surfaceConditions
         self.volumetricHeat = volumetricHeat
     }
 }
@@ -70,8 +88,10 @@ public struct ThermalAnalysis: Sendable {
 
     public func solve(_ model: ThermalModel) throws -> ThermalResult {
         let mesh = model.mesh
-        guard !model.constraints.isEmpty else {
-            throw FEMError.invalidModel("At least one thermal constraint is required")
+        guard !model.constraints.isEmpty || !model.surfaceConditions.isEmpty else {
+            throw FEMError.invalidModel(
+                "At least one thermal constraint or surface exchange condition is required"
+            )
         }
         guard model.material.thermalConductivity.isFinite,
               model.material.thermalConductivity > 0 else {
@@ -83,7 +103,7 @@ public struct ThermalAnalysis: Sendable {
             throw FEMError.invalidModel("Volumetric heat generation is not finite")
         }
         guard mesh.dimension == 3 || mesh.dimension == 2 else {
-            throw FEMError.invalidModel("Thermal analysis requires a tet4 or tri3 mesh")
+            throw FEMError.invalidModel("Thermal analysis requires a 2D or 3D continuum mesh")
         }
 
         var prescribed: [Int: Double] = [:]
@@ -100,11 +120,13 @@ public struct ThermalAnalysis: Sendable {
             }
             prescribed[constraint.node] = constraint.temperature
         }
-        try FEMAssembly.validateComponentCoverage(
-            mesh: mesh,
-            constrainedNodes: Set(prescribed.keys),
-            dimension: 1
-        )
+        if model.surfaceConditions.isEmpty {
+            try FEMAssembly.validateComponentCoverage(
+                mesh: mesh,
+                constrainedNodes: Set(prescribed.keys),
+                dimension: 1
+            )
+        }
 
         var rightHandSide = [Double](repeating: 0, count: mesh.nodes.count)
         for load in model.nodalHeat {
@@ -131,6 +153,7 @@ public struct ThermalAnalysis: Sendable {
                 conductivity: model.material.thermalConductivity
             )
             let nodes = data.nodeIndices
+            let nodalWeights = data.nodalMeasureWeights()
             for row in 0..<nodes.count {
                 for column in 0...row {
                     let value = local[row * nodes.count + column]
@@ -143,68 +166,97 @@ public struct ThermalAnalysis: Sendable {
                 }
                 if model.volumetricHeat != 0 {
                     rightHandSide[nodes[row]] += model.volumetricHeat
-                        * data.measure / Double(nodes.count)
+                        * nodalWeights[row]
                 }
             }
         }
 
-        let stiffness = try SparseMatrix.symmetric(
-            size: mesh.nodes.count,
-            lowerTriplets: triplets
-        )
         let free = try FEMAssembly.freeDOFs(
             count: mesh.nodes.count,
             prescribed: prescribed
         )
-        let reduced = try FEMAssembly.reduced(stiffness, freeDOFs: free)
-        let reducedRHS = FEMAssembly.reducedLoads(
-            matrix: stiffness,
-            rightHandSide: rightHandSide,
-            freeDOFs: free,
-            prescribed: prescribed
-        )
-
-        let solver: SparseSolver
-        do {
-            solver = try SparseSolver(
-                matrix: reduced,
-                method: options.solverMethod,
-                directSettings: options.directSettings
+        let hasRadiation = model.surfaceConditions.contains {
+            if case .radiation = $0 { return true }
+            return false
+        }
+        let ambientValues = model.surfaceConditions.map { condition -> Double in
+            switch condition {
+            case .convection(_, _, let ambient), .radiation(_, _, let ambient):
+                return ambient
+            }
+        }
+        let initialTemperature = prescribed.values.first
+            ?? (ambientValues.reduce(0, +) / Double(max(ambientValues.count, 1)))
+        var temperatures = [Double](repeating: initialTemperature, count: mesh.nodes.count)
+        for (node, value) in prescribed { temperatures[node] = value }
+        var report: SparseSolveReport?
+        let maximumIterations = hasRadiation ? 30 : 1
+        var converged = !hasRadiation
+        for _ in 0..<maximumIterations {
+            try Task.checkCancellation()
+            var iterationTriplets = triplets
+            var iterationRHS = rightHandSide
+            try addSurfaceExchange(
+                model.surfaceConditions,
+                mesh: mesh,
+                temperatures: temperatures,
+                triplets: &iterationTriplets,
+                rightHandSide: &iterationRHS
             )
-        } catch let error as SparseSolverError {
-            throw FEMError.solver(error)
-        } catch {
-            throw FEMError.solverFailure(String(describing: error))
+            let stiffness = try SparseMatrix.symmetric(
+                size: mesh.nodes.count,
+                lowerTriplets: iterationTriplets
+            )
+            let reduced = try FEMAssembly.reduced(stiffness, freeDOFs: free)
+            let reducedRHS = FEMAssembly.reducedLoads(
+                matrix: stiffness,
+                rightHandSide: iterationRHS,
+                freeDOFs: free,
+                prescribed: prescribed
+            )
+            let solver: SparseSolver
+            do {
+                solver = try SparseSolver(
+                    matrix: reduced,
+                    method: options.solverMethod,
+                    directSettings: options.directSettings
+                )
+                report = try solver.solveWithReport(reducedRHS)
+            } catch let error as SparseSolverError {
+                throw FEMError.solver(error)
+            } catch {
+                throw FEMError.solverFailure(String(describing: error))
+            }
+            guard let report, report.solution.allSatisfy(\.isFinite) else {
+                throw FEMError.nonFiniteSolution
+            }
+            var next = temperatures
+            for (index, node) in free.enumerated() { next[node] = report.solution[index] }
+            let change = zip(next, temperatures).reduce(0.0) {
+                max($0, abs($1.0 - $1.1))
+            }
+            temperatures = next
+            if !hasRadiation || change <= 1e-8 * max(1, temperatures.map(abs).max() ?? 1) {
+                converged = true
+                break
+            }
         }
-
-        let report: SparseSolveReport
-        do {
-            report = try solver.solveWithReport(reducedRHS)
-        } catch let error as SparseSolverError {
-            throw FEMError.solver(error)
-        } catch {
-            throw FEMError.solverFailure(String(describing: error))
+        guard let report else {
+            throw FEMError.solverFailure("Thermal solve produced no iteration")
         }
-        guard report.solution.allSatisfy(\.isFinite) else {
-            throw FEMError.nonFiniteSolution
-        }
-
-        var temperatures = [Double](repeating: 0, count: mesh.nodes.count)
-        for (node, value) in prescribed {
-            temperatures[node] = value
-        }
-        for (index, node) in free.enumerated() {
-            temperatures[node] = report.solution[index]
+        guard converged else {
+            throw FEMError.solverFailure(
+                "Thermal radiation iteration did not converge in \(maximumIterations) iterations"
+            )
         }
 
         var fluxes: [ElementHeatFlux] = []
         fluxes.reserveCapacity(kinematics.count)
         for data in kinematics {
             try Task.checkCancellation()
-            var gradient = SIMD3<Double>.zero
-            for (node, shapeGradient) in zip(data.nodeIndices, data.shapeGradients) {
-                gradient += shapeGradient * temperatures[node]
-            }
+            let gradient = data.averageGradient(
+                nodalValues: data.nodeIndices.map { temperatures[$0] }
+            )
             let flux = gradient * -model.material.thermalConductivity
             fluxes.append(ElementHeatFlux(
                 elementIndex: data.elementIndex,
@@ -219,6 +271,67 @@ public struct ThermalAnalysis: Sendable {
             maximumTemperature: temperatures.max() ?? 0,
             solveReport: report
         )
+    }
+
+    private func addSurfaceExchange(
+        _ conditions: [ThermalSurfaceCondition],
+        mesh: Mesh,
+        temperatures: [Double],
+        triplets: inout [SparseTriplet],
+        rightHandSide: inout [Double]
+    ) throws {
+        let sigma = 5.670374419e-8
+        for condition in conditions {
+            let nodes: [Int]
+            let ambient: Double
+            let coefficient: Double
+            switch condition {
+            case .convection(let values, let h, let value):
+                nodes = values
+                ambient = value
+                coefficient = h
+                guard h.isFinite, h >= 0, value.isFinite else {
+                    throw FEMError.invalidModel("Invalid convection condition")
+                }
+            case .radiation(let values, let emissivity, let value):
+                nodes = values
+                ambient = value
+                guard emissivity.isFinite, (0...1).contains(emissivity),
+                      value.isFinite, value >= 0,
+                      values.allSatisfy(mesh.nodes.indices.contains) else {
+                    throw FEMError.invalidModel("Invalid radiation condition")
+                }
+                let surfaceTemperature = values.reduce(0.0) {
+                    $0 + max(0, temperatures[$1])
+                } / Double(max(values.count, 1))
+                coefficient = emissivity * sigma
+                    * (surfaceTemperature + value)
+                    * (surfaceTemperature * surfaceTemperature + value * value)
+            }
+            guard nodes.count == 3 || nodes.count == 4,
+                  Set(nodes).count == nodes.count,
+                  nodes.allSatisfy(mesh.nodes.indices.contains) else {
+                throw FEMError.invalidModel(
+                    "Thermal surface conditions require a valid tri3 or quad4 face"
+                )
+            }
+            let origin = mesh.nodes[nodes[0]]
+            var area = 0.0
+            for index in 1..<(nodes.count - 1) {
+                area += 0.5 * simd_length(simd_cross(
+                    mesh.nodes[nodes[index]] - origin,
+                    mesh.nodes[nodes[index + 1]] - origin
+                ))
+            }
+            guard area.isFinite, area > 1e-15 else {
+                throw FEMError.invalidModel("Thermal surface face is degenerate")
+            }
+            let nodal = coefficient * area / Double(nodes.count)
+            for node in nodes {
+                triplets.append(SparseTriplet(row: node, column: node, value: nodal))
+                rightHandSide[node] += nodal * ambient
+            }
+        }
     }
 }
 
