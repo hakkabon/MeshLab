@@ -194,8 +194,20 @@ struct WorkbenchView: View {
                     )
                 }
                 if model.project.analysis == .nonlinearStatic {
+                    Picker(
+                        "Constitutive model",
+                        selection: $model.project.nonlinearOptions.constitutiveModel
+                    ) {
+                        ForEach(NonlinearConstitutiveModel.allCases, id: \.self) {
+                            Text($0.title).tag($0)
+                        }
+                    }
+                    Toggle(
+                        "Adaptive stepping",
+                        isOn: $model.project.nonlinearOptions.adaptiveStepping
+                    )
                     LabeledContent(
-                        "Load steps",
+                        "Initial steps",
                         value: "\(model.project.nonlinearOptions.loadSteps)"
                     )
                     LabeledContent(
@@ -795,6 +807,10 @@ struct WorkbenchView: View {
                             "Newton iterations",
                             value: "\(nonlinear.totalNewtonIterations)"
                         )
+                        LabeledContent(
+                            "Rejected steps",
+                            value: "\(nonlinear.rejectedStepCount)"
+                        )
                         staticResultRows(result)
                     } else {
                         emptyResults
@@ -1344,7 +1360,7 @@ struct WorkbenchView: View {
         case .productionLinear:
             return "Run the configured load cases and combinations, then inspect individual or envelope results."
         case .nonlinearStatic:
-            return "Run incremental finite-strain equilibrium with damped Newton iterations."
+            return "Run adaptive finite-strain equilibrium with sparse Newton iterations."
         case .coupledThermoMechanical:
             return "Run staggered thermal and structural fields until their updates converge."
         case .modal:
@@ -1447,6 +1463,16 @@ private extension ModalSolverKind {
         case .automatic: return "Automatic"
         case .dense: return "Dense LAPACK"
         case .sparseSubspace: return "Sparse subspace"
+        }
+    }
+}
+
+private extension NonlinearConstitutiveModel {
+    var title: String {
+        switch self {
+        case .saintVenantKirchhoff: return "Saint Venant–Kirchhoff"
+        case .neoHookean: return "Neo-Hookean"
+        case .j2Plasticity: return "J2 plasticity"
         }
     }
 }

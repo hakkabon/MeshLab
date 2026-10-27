@@ -96,7 +96,7 @@ public struct ThermalStudy: Sendable, Hashable, Codable {
 /// The project owns the mesh and analysis definition. Display settings travel
 /// with the document so reopening a project restores the same review state.
 public struct MeshLabProject: Sendable, Equatable, Codable {
-    public static let currentSchemaVersion = 11
+    public static let currentSchemaVersion = 12
 
     public var schemaVersion: Int
     public var name: String

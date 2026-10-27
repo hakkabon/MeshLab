@@ -14,6 +14,7 @@ import Testing
         "linear-thermal-bar",
         "structured-mesh-quality",
         "finite-strain-small-load",
+        "nonlinear-production-contract",
         "constrained-parametric-pareto",
         "qualified-static-artifact",
     ])

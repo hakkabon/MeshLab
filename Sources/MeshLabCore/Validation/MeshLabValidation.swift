@@ -147,6 +147,7 @@ public enum MeshLabValidation {
             try linearThermalCase(),
             try meshQualityCase(),
             try finiteStrainSmallLoadCase(),
+            try nonlinearProductionCase(),
             try constrainedDesignCase(),
             try engineeringQualificationCase(),
         ])
@@ -425,6 +426,77 @@ public enum MeshLabValidation {
                     observed: nonlinear.equilibrium.relativeFreeResidual,
                     reference: 0,
                     absoluteTolerance: 1e-9
+                ),
+            ]
+        )
+    }
+
+    private static func nonlinearProductionCase() throws -> ValidationCase {
+        let mesh = try Mesh(
+            nodes: [
+                SIMD3<Double>(0, 0, 0), SIMD3<Double>(1, 0, 0),
+                SIMD3<Double>(0, 1, 0), SIMD3<Double>(0, 0, 1),
+            ],
+            elements: [Element(type: .tetrahedron4, nodes: [0, 1, 2, 3])]
+        )
+        let material = try ElasticMaterial(youngModulus: 1e7, poissonRatio: 0.3)
+        func model(load: Double) -> FEMModel {
+            FEMModel(
+                mesh: mesh,
+                material: material,
+                constraints: [
+                    .fixed(node: 0),
+                    .fixed(node: 1, axis: 1), .fixed(node: 1, axis: 2),
+                    .fixed(node: 2, axis: 2),
+                ],
+                loads: [.nodal(node: 3, vector: SIMD3<Double>(0, 0, load))]
+            )
+        }
+        let smallModel = model(load: 10)
+        let linear = try StaticAnalysis().solve(smallModel)
+        let neoHookean = try NonlinearStaticAnalysis(options: NonlinearStaticOptions(
+            loadSteps: 2,
+            residualTolerance: 1e-10,
+            constitutiveModel: .neoHookean
+        )).solve(smallModel)
+        let plastic = try NonlinearStaticAnalysis(options: NonlinearStaticOptions(
+            loadSteps: 8,
+            residualTolerance: 1e-8,
+            constitutiveModel: .j2Plasticity,
+            yieldStress: 1_000,
+            hardeningModulus: 50_000
+        )).solve(model(load: 2_000))
+        let relativeNeoHookeanError = abs(
+            neoHookean.staticResult.maxDisplacement - linear.maxDisplacement
+        ) / linear.maxDisplacement
+        let equivalentPlasticStrain = plastic.elementStates.first?.values.last ?? 0
+        return ValidationCase(
+            identifier: "nonlinear-production-contract",
+            category: "nonlinear-structural",
+            metrics: [
+                ValidationMetric(
+                    name: "neo-hookean-linear-limit",
+                    observed: relativeNeoHookeanError,
+                    reference: 0,
+                    absoluteTolerance: 1e-4
+                ),
+                ValidationMetric(
+                    name: "plastic-state-width",
+                    observed: Double(plastic.elementStates.first?.values.count ?? 0),
+                    reference: 7,
+                    absoluteTolerance: 0
+                ),
+                ValidationMetric(
+                    name: "plastic-yielded",
+                    observed: equivalentPlasticStrain > 0 ? 1 : 0,
+                    reference: 1,
+                    absoluteTolerance: 0
+                ),
+                ValidationMetric(
+                    name: "final-load-factor",
+                    observed: plastic.loadSteps.last?.loadFactor ?? 0,
+                    reference: 1,
+                    absoluteTolerance: 0
                 ),
             ]
         )

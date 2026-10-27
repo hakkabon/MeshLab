@@ -61,7 +61,7 @@ private func nonlinearTetra(load: Double, modulus: Double = 1e7) throws -> FEMMo
     #expect(nonlinear.totalNewtonIterations > 0)
 }
 
-@Test func finiteStrainRejectsNonzeroPrescribedDisplacement() throws {
+@Test func finiteStrainRampsNonzeroPrescribedDisplacement() throws {
     var model = try nonlinearTetra(load: 10)
     model.constraints.removeFirst()
     model.constraints.append(contentsOf: [
@@ -69,9 +69,8 @@ private func nonlinearTetra(load: Double, modulus: Double = 1e7) throws -> FEMMo
         .fixed(node: 0, axis: 1),
         .fixed(node: 0, axis: 2),
     ])
-    #expect(throws: NonlinearStaticError.self) {
-        _ = try NonlinearStaticAnalysis().solve(model)
-    }
+    let result = try NonlinearStaticAnalysis().solve(model)
+    #expect(abs(result.staticResult.displacements[0].x - 0.01) < 1e-12)
 }
 
 @Test func staggeredThermoMechanicalCouplingConvergesAndSoftensMaterial() throws {

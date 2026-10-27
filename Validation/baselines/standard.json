@@ -63,7 +63,7 @@
           "name" : "maximum-von-mises",
           "observed" : 155832.67495700676,
           "passed" : true,
-          "reference" : 155832.6749563696,
+          "reference" : 155832.67495636962,
           "relativeTolerance" : 1e-07
         },
         {
@@ -161,7 +161,7 @@
         {
           "absoluteTolerance" : 1e-12,
           "name" : "maximum-displacement",
-          "observed" : 5.999946000844263e-06,
+          "observed" : 5.999946000844261e-06,
           "passed" : true,
           "reference" : 6.000000000000002e-06,
           "relativeTolerance" : 0.0001
@@ -172,6 +172,45 @@
           "observed" : 1.129712925854101e-11,
           "passed" : true,
           "reference" : 0,
+          "relativeTolerance" : 0
+        }
+      ],
+      "passed" : true
+    },
+    {
+      "category" : "nonlinear-structural",
+      "identifier" : "nonlinear-production-contract",
+      "metrics" : [
+        {
+          "absoluteTolerance" : 0.0001,
+          "name" : "neo-hookean-linear-limit",
+          "observed" : 4.633850963786801e-06,
+          "passed" : true,
+          "reference" : 0,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 0,
+          "name" : "plastic-state-width",
+          "observed" : 7,
+          "passed" : true,
+          "reference" : 7,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 0,
+          "name" : "plastic-yielded",
+          "observed" : 1,
+          "passed" : true,
+          "reference" : 1,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 0,
+          "name" : "final-load-factor",
+          "observed" : 1,
+          "passed" : true,
+          "reference" : 1,
           "relativeTolerance" : 0
         }
       ],

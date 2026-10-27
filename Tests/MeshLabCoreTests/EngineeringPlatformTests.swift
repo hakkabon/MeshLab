@@ -89,13 +89,13 @@ private func qualificationProject() throws -> MeshLabProject {
     }
 }
 
-@Test func schemaElevenRoundTripsAndDefaultsUnitsFromVersionNine() throws {
+@Test func schemaTwelveRoundTripsAndDefaultsUnitsFromVersionNine() throws {
     var project = try qualificationProject()
     project.engineeringRequirements.maximumDisplacement = 0.01
     let data = try MeshLabProjectFile.encode(project)
     let decoded = try MeshLabProjectFile.decode(data)
     #expect(decoded == project)
-    #expect(decoded.schemaVersion == 11)
+    #expect(decoded.schemaVersion == 12)
 
     var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
     object["schemaVersion"] = 9

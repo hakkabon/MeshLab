@@ -18,6 +18,8 @@ relationship to the NumericCore ecosystem.
 | [0011](0011-advanced-design-and-scale.md) | Accepted | Add constrained Pareto exploration, design CSV export, fingerprinted sweep resume/retry, and project schema v8. |
 | [0012](0012-engineering-platform.md) | Accepted | Add schema-v9 project provenance and acceptance criteria, deterministic qualification artifacts, workbench review, and the MeshLabReport CI worker. |
 | [0013](0013-p10-5-verification-and-shared-contracts.md) | Accepted | Add exact NumericCore provenance, validation baselines, prepared linear systems, unit-aware qualification, element contracts, and transient/product workflow consolidation. |
+| [0014](0014-p11a-elements-and-interoperability.md) | Accepted | Add higher-order solids, structural kernels, surface physics, sparse modal extraction, modern interchange, convergence estimation, and schema v11. |
+| [0015](0015-p11b-nonlinear-production-depth.md) | Accepted | Add sparse adaptive Newton equilibrium, hyperelasticity, committed J2 plasticity, plane contact, prescribed motion, and schema v12. |
 
 When a decision changes, add a new ADR that supersedes the old one rather than
 silently rewriting history.

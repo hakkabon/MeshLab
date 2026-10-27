@@ -191,7 +191,22 @@ next production-foundation increment:
 - mesh-convergence studies report observed order, Richardson extrapolation,
   and estimated relative discretization error.
 
-The package has 113 tests covering vector/dense/sparse math, mesh topology and
+P11B (nonlinear production depth) is complete for robust path-following on the
+current `tet4` finite-strain formulation:
+
+- sparse Newton tangents replace the dense global Jacobian and use the
+  NumericCore sparse solver facade at every equilibrium iteration;
+- adaptive load increments grow after easy convergence and cut back/retry
+  failed or inverted steps down to a configured minimum;
+- Saint Venant–Kirchhoff, compressible Neo-Hookean, and isotropic-hardening J2
+  constitutive laws provide moderate-strain elastic and path-dependent response;
+- committed per-element plastic history is isolated from trial Newton states;
+- frictionless node-to-plane penalty contact and ramped nonzero prescribed
+  displacements extend production boundary conditions;
+- schema v12 persists the nonlinear law, stepping controls, plastic parameters,
+  and contact definitions, with workbench model selection and retry reporting.
+
+The package has 118 tests covering vector/dense/sparse math, mesh topology and
 surface extraction, linear-static FEM equilibrium, solver backends and
 factorization reuse, modal/transient dynamics, thermal conduction and thermal
 stress, parametric sweeps, compliance adjoints, topology/shape optimization,
@@ -306,7 +321,7 @@ platform-specific GPU execution; those remain deployment-layer concerns.
 ## Engineering qualification
 
 `MeshLabReport` evaluates the analysis selected by a project and applies its
-schema-v11 `engineeringRequirements`. The JSON artifact is deterministic: it
+schema-v12 `engineeringRequirements`. The JSON artifact is deterministic: it
 does not include a wall-clock timestamp or host-specific data, so it can be
 reviewed in source control and compared across Swift-NumericCore and
 Rust-NumericCore releases.
@@ -409,7 +424,7 @@ the environment it was captured on.
   pass/fail status.
 - Solver picker for Accelerate and NumericCore direct/iterative methods, plus
   a matrix-free CG path for static and thermal-structural studies.
-- Versioned JSON project import/export (schema v11, v1–v10 migration), ASCII
+- Versioned JSON project import/export (schema v12, v1–v11 migration), ASCII
   Gmsh mesh import, static/modal/thermal CSV, and legacy VTK result export.
 - Asynchronous solve with progress, cancellation of stale results, and errors.
 - Surface picking resolves the deformed hit point to a source node.
@@ -426,8 +441,8 @@ the environment it was captured on.
 
 ## Current limitations
 
-- Modal analysis uses a dense LAPACK eigensolver, so memory and time grow
-  cubically with the number of free DOFs.
+- Modal analysis has dense and sparse-subspace paths, but the sparse eigensolver
+  is a MeshLab adapter pending a released upstream NumericCore contract.
 - Modal and transient analyses require homogeneous Dirichlet constraints.
 - Transient dynamics supports project load-factor histories and workbench state
   scrubbing, but not continuous playback, streaming storage, or transient stress
@@ -436,23 +451,23 @@ the environment it was captured on.
   couples through deformed conduction geometry, thermal strain, and an optional
   uniform temperature-dependent stiffness factor; it is not a monolithic
   tangent formulation and does not model mechanical heat generation.
-- Thermal analysis is steady-state only; convection and radiation are not
-  implemented.
-- Nonlinear statics is limited to total-Lagrangian `tet4` elements with a Saint
-  Venant--Kirchhoff material, homogeneous displacement constraints, fixed load
-  steps, and a dense Newton Jacobian. It is intended for moderate finite strain;
-  robust hyperelasticity, adaptive stepping, contact, buckling, and plasticity
-  are not implemented.
-- Constant-strain `tet4`/`tri3` elements only; no `tet10`, `hex8`, shells, or
-  beams.
-- Mesh generation is structured; Gmsh can supply unstructured first-order
-  meshes, but there is no CAD kernel, mesh repair, adaptivity, or discretization
-  error estimator. Quality indicators diagnose shape but do not prove accuracy.
+- Thermal analysis is steady-state only; convection and radiation are supported,
+  but transient thermal capacity and phase change are not.
+- Nonlinear statics remains limited to total-Lagrangian `tet4` geometry. J2
+  plasticity uses a Green-strain radial return rather than multiplicative
+  finite-plasticity kinematics, and contact is frictionless node-to-plane
+  penalty contact. Arc-length limit-point tracing, friction, general
+  surface-to-surface contact, buckling, and nonlinear `tet10`/`hex8` remain.
+- `tet10` and `hex8` are integrated continuum solids. Frame and membrane-shell
+  kernels expose mixed-DOF contributions, but a full structural assembler and
+  shell bending formulation are not yet present.
+- Mesh generation is structured; Gmsh supplies supported unstructured meshes,
+  but there is no CAD kernel, mesh repair, or adaptive remeshing. Convergence
+  estimation diagnoses discretization trends but does not drive refinement.
 - No document-based autosave or signed/templated PDF report generation yet;
   qualification reports are deterministic JSON and Markdown.
-- Gmsh import is ASCII-only and limited to linear `triangle3`/`tetrahedron4`;
-  binary Gmsh, OBJ/STL/CAD, higher-order elements, and VTU/XDMF are not
-  implemented. Project schema v11 files are not readable by older clients.
+- Gmsh import remains ASCII-only; binary Gmsh and OBJ/STL/CAD are not
+  implemented. Project schema v12 files are not readable by older clients.
 - Design optimization is limited to linear-static compliance with homogeneous
   Dirichlet constraints and no thermal loading.
 - Topology optimization reports densities but does not render a density field;
@@ -553,11 +568,13 @@ Scripts/
   `tet10`/`hex8` solids, frame and membrane-shell kernels, pressure and thermal
   surface exchange, sparse modal extraction, VTU/XDMF and richer Gmsh support,
   mesh-convergence estimation, and schema-v11 analysis settings.
-- **P11 — Advanced constitutive physics and acceleration:** sparse/matrix-free
-  nonlinear tangents, released NumericCore operator/Krylov and sparse-modal APIs,
-  adaptive continuation, hyperelasticity/plasticity/contact, monolithic and
-  transient multiphysics, Metal/MPS numerical paths, distributed artifacts, and
-  mid-request checkpoints.
+- **P11B — Nonlinear production depth (complete):** sparse Newton assembly,
+  adaptive cutback/growth, Neo-Hookean elasticity, committed J2 hardening,
+  frictionless plane contact, nonzero prescribed motion, and schema v12.
+- **P11C — Coupled physics and acceleration:** released NumericCore
+  operator/Krylov and sparse-modal APIs, arc-length continuation, general
+  contact and finite plasticity, monolithic/transient multiphysics, Metal/MPS
+  numerical paths, distributed artifacts, and mid-request checkpoints.
 
 ## Contributing
 
