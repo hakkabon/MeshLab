@@ -12,6 +12,7 @@ import Testing
         "structured-mesh-quality",
         "finite-strain-small-load",
         "constrained-parametric-pareto",
+        "qualified-static-artifact",
     ])
     #expect(try report.jsonData() == report.jsonData())
 }

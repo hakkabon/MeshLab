@@ -73,7 +73,7 @@ private func advancedDesignProject(loadScale: Double = 1) throws -> MeshLabProje
     let encoded = try MeshLabProjectFile.encode(project)
     let roundTrip = try MeshLabProjectFile.decode(encoded)
     #expect(roundTrip == project)
-    #expect(roundTrip.schemaVersion == 8)
+    #expect(roundTrip.schemaVersion == MeshLabProject.currentSchemaVersion)
 
     var object = try #require(
         try JSONSerialization.jsonObject(with: encoded) as? [String: Any]

@@ -138,7 +138,22 @@ restartable workers:
 - project schema v8 defaults the new design settings when loading v1–v7 files,
   and deterministic validation now includes constrained Pareto exploration.
 
-The package has 91 tests covering vector/dense/sparse math, mesh topology and
+P10 (Engineering platform) is complete for deterministic qualification and
+traceable analysis release:
+
+- projects carry a controlled identifier, revision, analyst, summary, and
+  engineering acceptance limits for response, convergence, residual, frequency,
+  and mesh quality;
+- every configured analysis can produce a versioned qualification artifact with
+  project fingerprint, solver/numerical contract, mesh provenance, response
+  summary, individual checks, and an overall pass/fail decision;
+- artifacts serialize as deterministic JSON and render as reviewable Markdown;
+- `MeshLabReport` runs qualification headlessly for CI, returning exit status 2
+  when analysis succeeds but engineering checks do not pass;
+- the workbench edits provenance, runs qualification asynchronously, and shows
+  check-level status; project schema v9 migrates v1–v8 documents safely.
+
+The package has 96 tests covering vector/dense/sparse math, mesh topology and
 surface extraction, linear-static FEM equilibrium, solver backends and
 factorization reuse, modal/transient dynamics, thermal conduction and thermal
 stress, parametric sweeps, compliance adjoints, topology/shape optimization,
@@ -185,6 +200,7 @@ creation.
 | `MeshLabApp` | SwiftUI workbench: project import/export, asynchronous solve and design studies, inspection, picking, and colorbar. |
 | `MeshLabBenchmarks` | Release-mode timing harness for mesh generation, assembled and matrix-free solves, and render-scene construction. |
 | `MeshLabSweep` | JSON batch-sweep worker with bounded parallelism for local or cloud execution. |
+| `MeshLabReport` | Headless engineering qualification worker emitting deterministic JSON and optional Markdown. |
 
 ### Ownership boundary
 
@@ -218,6 +234,7 @@ swift build -c release
 swift run MeshLabApp
 swift run MeshLabSweep --help
 swift run MeshLabValidate
+swift run MeshLabReport --help
 ```
 
 The package resolves `Swift-NumericCore` 1.x from a released tag and commits
@@ -246,6 +263,23 @@ by a deterministic fingerprint of the complete request, so edited projects are
 executed again rather than receiving stale summaries. The worker does not yet
 provide mid-request checkpoints, cloud artifact storage, authentication, or
 platform-specific GPU execution; those remain deployment-layer concerns.
+
+## Engineering qualification
+
+`MeshLabReport` evaluates the analysis selected by a project and applies its
+schema-v9 `engineeringRequirements`. The JSON artifact is deterministic: it
+does not include a wall-clock timestamp or host-specific data, so it can be
+reviewed in source control and compared across Swift-NumericCore and
+Rust-NumericCore releases.
+
+```bash
+swift run -c release MeshLabReport project.json --output assessment.json \
+  --markdown assessment.md
+```
+
+Exit status 0 means all configured checks passed, 1 means execution or decoding
+failed, and 2 means analysis completed but at least one requirement failed or
+could not be evaluated by that analysis kind.
 
 ## Benchmarks
 
@@ -307,6 +341,8 @@ the environment it was captured on.
 - ASCII Gmsh 2.2/4.1 import for first-order triangles/tetrahedra with explicit
   units and named physical regions; legacy ASCII VTK result export.
 - Deterministic `MeshLabValidate` JSON for cross-version numerical checks.
+- Deterministic engineering qualification artifacts with project fingerprints,
+  response limits, mesh/solver provenance, and JSON/Markdown reporting.
 - Production linear studies with named-region constraints and materials,
   independent load cases, factored combinations, and governing-result envelopes.
 - Static force/moment equilibrium and free-residual diagnostics, plus
@@ -327,9 +363,11 @@ the environment it was captured on.
 - Parametric, topology, and shape design studies with asynchronous runs,
   response constraints, Pareto summaries, design CSV export, and
   best-sample/optimized-field rendering.
+- Editable engineering provenance, asynchronous qualification, and per-check
+  pass/fail status.
 - Solver picker for Accelerate and NumericCore direct/iterative methods, plus
   a matrix-free CG path for static and thermal-structural studies.
-- Versioned JSON project import/export (schema v8, v1–v7 migration), ASCII
+- Versioned JSON project import/export (schema v9, v1–v8 migration), ASCII
   Gmsh mesh import, static/modal/thermal CSV, and legacy VTK result export.
 - Asynchronous solve with progress, cancellation of stale results, and errors.
 - Surface picking resolves the deformed hit point to a source node.
@@ -367,10 +405,11 @@ the environment it was captured on.
 - Mesh generation is structured; Gmsh can supply unstructured first-order
   meshes, but there is no CAD kernel, mesh repair, adaptivity, or discretization
   error estimator. Quality indicators diagnose shape but do not prove accuracy.
-- No document-based autosave or report generation yet.
+- No document-based autosave or signed/templated PDF report generation yet;
+  qualification reports are deterministic JSON and Markdown.
 - Gmsh import is ASCII-only and limited to linear `triangle3`/`tetrahedron4`;
   binary Gmsh, OBJ/STL/CAD, higher-order elements, and VTU/XDMF are not
-  implemented. Project schema v8 files are not readable by older clients.
+  implemented. Project schema v9 files are not readable by older clients.
 - Design optimization is limited to linear-static compliance with homogeneous
   Dirichlet constraints and no thermal loading.
 - Topology optimization reports densities but does not render a density field;
@@ -392,6 +431,9 @@ the environment it was captured on.
 - Batch sweeps hold the full job and result set in memory. Resume operates at
   request boundaries; there are no mid-analysis checkpoints, artifact storage,
   remote coordination, or authentication.
+- Qualification artifacts are deterministic evidence rather than cryptographic
+  attestations: they are not signed, timestamped, or stored in an immutable
+  artifact service.
 - Rendering lacks clipping, vector glyphs, and time animation.
 - Picking is CPU ray casting and will need a spatial index or GPU picking for
   very large surfaces.
@@ -413,6 +455,7 @@ Sources/
   MeshLabApp/         SwiftUI workbench executable
   MeshLabSweep/       JSON batch-sweep command-line worker
   MeshLabValidate/    deterministic interoperability validation worker
+  MeshLabReport/      headless engineering qualification and report worker
 Tests/
   MeshLabCoreTests/   math, mesh, FEM, design, and scale tests
   MeshLabRenderTests/ camera, scene, Metal pipeline tests
@@ -455,7 +498,10 @@ Scripts/
 - **P9 — Advanced design and scale (complete):** constrained parametric
   exploration, Pareto fronts, design CSV export, fingerprinted resume/retry,
   schema v8, workbench summaries, and deterministic validation.
-- **P10 — Advanced constitutive physics and acceleration:** sparse/matrix-free
+- **P10 — Engineering platform (complete):** project provenance and acceptance
+  criteria, deterministic qualification artifacts, JSON/Markdown reports,
+  schema v9, workbench qualification, and the `MeshLabReport` CI worker.
+- **P11 — Advanced constitutive physics and acceleration:** sparse/matrix-free
   nonlinear tangents, adaptive continuation, hyperelasticity/plasticity/contact,
   monolithic and transient multiphysics, Metal/MPS numerical paths, reusable
   multi-RHS solves, distributed artifacts, and mid-request checkpoints.

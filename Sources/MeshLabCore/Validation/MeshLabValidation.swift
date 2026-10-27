@@ -74,6 +74,7 @@ public enum MeshLabValidation {
             try meshQualityCase(),
             try finiteStrainSmallLoadCase(),
             try constrainedDesignCase(),
+            try engineeringQualificationCase(),
         ])
     }
 
@@ -307,6 +308,41 @@ public enum MeshLabValidation {
                 ValidationMetric(
                     name: "best-index",
                     observed: Double(result.bestIndex),
+                    reference: 0,
+                    absoluteTolerance: 0
+                ),
+            ]
+        )
+    }
+
+    private static func engineeringQualificationCase() throws -> ValidationCase {
+        var project = try MeshLabProject.cantileverExample()
+        project.engineeringMetadata = EngineeringProjectMetadata(
+            identifier: "validation-cantilever",
+            revision: "1"
+        )
+        project.engineeringRequirements = EngineeringRequirements(
+            maximumDisplacement: 1,
+            maximumVonMises: 1e12,
+            maximumRelativeResidual: 1e-8,
+            minimumMeshQuality: 0.01
+        )
+        let artifact = try EngineeringAssessment.run(project)
+        return ValidationCase(
+            identifier: "qualified-static-artifact",
+            category: "engineering-platform",
+            metrics: [
+                ValidationMetric(
+                    name: "passed",
+                    observed: artifact.passed ? 1 : 0,
+                    reference: 1,
+                    absoluteTolerance: 0
+                ),
+                ValidationMetric(
+                    name: "failed-checks",
+                    observed: Double(artifact.checks.filter {
+                        $0.status != .passed
+                    }.count),
                     reference: 0,
                     absoluteTolerance: 0
                 ),

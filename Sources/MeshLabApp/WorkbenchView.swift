@@ -371,6 +371,89 @@ struct WorkbenchView: View {
                 }
             }
 
+            Section("Engineering Qualification") {
+                TextField(
+                    "Project ID",
+                    text: $model.project.engineeringMetadata.identifier
+                )
+                TextField(
+                    "Revision",
+                    text: $model.project.engineeringMetadata.revision
+                )
+                TextField(
+                    "Analyst",
+                    text: $model.project.engineeringMetadata.analyst
+                )
+                TextField(
+                    "Summary",
+                    text: $model.project.engineeringMetadata.summary,
+                    axis: .vertical
+                )
+                let requirements = model.project.engineeringRequirements
+                LabeledContent(
+                    "Configured limits",
+                    value: "\(engineeringRequirementCount(requirements))"
+                )
+                DisclosureGroup("Acceptance limits") {
+                    Toggle(
+                        "Require convergence",
+                        isOn: $model.project.engineeringRequirements.requireConvergence
+                    )
+                    TextField(
+                        "Max displacement",
+                        text: engineeringRequirementBinding(\.maximumDisplacement)
+                    )
+                    TextField(
+                        "Max von Mises",
+                        text: engineeringRequirementBinding(\.maximumVonMises)
+                    )
+                    TextField(
+                        "Max temperature",
+                        text: engineeringRequirementBinding(\.maximumTemperature)
+                    )
+                    TextField(
+                        "Min frequency",
+                        text: engineeringRequirementBinding(\.minimumFrequency)
+                    )
+                    TextField(
+                        "Max relative residual",
+                        text: engineeringRequirementBinding(\.maximumRelativeResidual)
+                    )
+                    TextField(
+                        "Min mesh quality",
+                        text: engineeringRequirementBinding(\.minimumMeshQuality)
+                    )
+                }
+                Button {
+                    model.runEngineeringAssessment()
+                } label: {
+                    Label("Run Qualification", systemImage: "checkmark.seal")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isAssessing || model.isSolving || model.isDesigning)
+
+                if model.isAssessing {
+                    ProgressView("Assessing…")
+                }
+                if let artifact = model.engineeringArtifact {
+                    LabeledContent(
+                        "Status",
+                        value: artifact.passed ? "PASS" : "FAIL"
+                    )
+                    LabeledContent(
+                        "Fingerprint",
+                        value: artifact.projectFingerprint
+                    )
+                    ForEach(Array(artifact.checks.enumerated()), id: \.offset) { _, check in
+                        LabeledContent(
+                            check.kind.rawValue,
+                            value: check.status.rawValue
+                        )
+                    }
+                }
+            }
+
             Section("Material") {
                 LabeledContent("E (GPa)") {
                     TextField(
@@ -805,6 +888,41 @@ struct WorkbenchView: View {
         case .loadScale:
             return String(format: "%.4g×", value)
         }
+    }
+
+    private func engineeringRequirementCount(_ value: EngineeringRequirements) -> Int {
+        [
+            value.maximumDisplacement,
+            value.maximumVonMises,
+            value.maximumTemperature,
+            value.minimumFrequency,
+            value.maximumRelativeResidual,
+            value.minimumMeshQuality,
+        ].compactMap { $0 }.count + (value.requireConvergence ? 1 : 0)
+    }
+
+    private func engineeringRequirementBinding(
+        _ keyPath: WritableKeyPath<EngineeringRequirements, Double?>
+    ) -> Binding<String> {
+        Binding(
+            get: {
+                model.project.engineeringRequirements[keyPath: keyPath].map {
+                    String(format: "%.8g", $0)
+                } ?? ""
+            },
+            set: { text in
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                var requirements = model.project.engineeringRequirements
+                if trimmed.isEmpty {
+                    requirements[keyPath: keyPath] = nil
+                } else if let value = Double(trimmed), value.isFinite {
+                    requirements[keyPath: keyPath] = value
+                } else {
+                    return
+                }
+                model.project.engineeringRequirements = requirements
+            }
+        )
     }
 
     private var parametricSampleCount: Int {

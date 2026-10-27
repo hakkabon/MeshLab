@@ -38,7 +38,7 @@ public struct ThermalStudy: Sendable, Hashable, Codable {
 /// The project owns the mesh and analysis definition. Display settings travel
 /// with the document so reopening a project restores the same review state.
 public struct MeshLabProject: Sendable, Equatable, Codable {
-    public static let currentSchemaVersion = 8
+    public static let currentSchemaVersion = 9
 
     public var schemaVersion: Int
     public var name: String
@@ -64,6 +64,8 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
     public var selectedLinearResultID: String?
     public var nonlinearOptions: NonlinearStaticOptions
     public var coupledOptions: CoupledThermoMechanicalOptions
+    public var engineeringMetadata: EngineeringProjectMetadata
+    public var engineeringRequirements: EngineeringRequirements
 
     public init(
         name: String = "Untitled",
@@ -88,7 +90,9 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         linearStudy: ProductionLinearStudy = ProductionLinearStudy(),
         selectedLinearResultID: String? = nil,
         nonlinearOptions: NonlinearStaticOptions = NonlinearStaticOptions(),
-        coupledOptions: CoupledThermoMechanicalOptions = CoupledThermoMechanicalOptions()
+        coupledOptions: CoupledThermoMechanicalOptions = CoupledThermoMechanicalOptions(),
+        engineeringMetadata: EngineeringProjectMetadata = EngineeringProjectMetadata(),
+        engineeringRequirements: EngineeringRequirements = EngineeringRequirements()
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.name = name
@@ -114,6 +118,8 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         self.selectedLinearResultID = selectedLinearResultID
         self.nonlinearOptions = nonlinearOptions
         self.coupledOptions = coupledOptions
+        self.engineeringMetadata = engineeringMetadata
+        self.engineeringRequirements = engineeringRequirements
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -141,6 +147,8 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         case selectedLinearResultID
         case nonlinearOptions
         case coupledOptions
+        case engineeringMetadata
+        case engineeringRequirements
     }
 
     public init(from decoder: Decoder) throws {
@@ -209,6 +217,14 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
             CoupledThermoMechanicalOptions.self,
             forKey: .coupledOptions
         ) ?? CoupledThermoMechanicalOptions()
+        self.engineeringMetadata = try container.decodeIfPresent(
+            EngineeringProjectMetadata.self,
+            forKey: .engineeringMetadata
+        ) ?? EngineeringProjectMetadata()
+        self.engineeringRequirements = try container.decodeIfPresent(
+            EngineeringRequirements.self,
+            forKey: .engineeringRequirements
+        ) ?? EngineeringRequirements()
     }
 
     public func makeModel() -> FEMModel {

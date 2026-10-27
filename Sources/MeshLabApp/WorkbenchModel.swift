@@ -35,6 +35,9 @@ final class WorkbenchModel: ObservableObject {
                 clearDesign()
                 cancelDesign()
             }
+            if project != oldValue {
+                cancelAssessment()
+            }
             if project.analysis == .modal,
                project.selectedMode != oldValue.selectedMode {
                 refreshModalScene()
@@ -52,6 +55,8 @@ final class WorkbenchModel: ObservableObject {
     @Published private(set) var isSolving = false
     @Published private(set) var isDesigning = false
     @Published private(set) var lastDesignSeconds: Double?
+    @Published private(set) var engineeringArtifact: EngineeringRunArtifact?
+    @Published private(set) var isAssessing = false
     @Published private(set) var needsSolve = true
     @Published private(set) var selection: SurfacePick?
     @Published private(set) var lastSolveSeconds: Double?
@@ -60,8 +65,10 @@ final class WorkbenchModel: ObservableObject {
 
     private var solveTask: Task<Void, Never>?
     private var designTask: Task<Void, Never>?
+    private var assessmentTask: Task<Void, Never>?
     private var solveGeneration = 0
     private var designGeneration = 0
+    private var assessmentGeneration = 0
     private var revision = 0
     private var designMesh: Mesh?
     private var designStaticResult: StaticResult?
@@ -78,6 +85,7 @@ final class WorkbenchModel: ObservableObject {
     deinit {
         solveTask?.cancel()
         designTask?.cancel()
+        assessmentTask?.cancel()
     }
 
     var renderOptions: RenderOptions {
@@ -289,6 +297,47 @@ final class WorkbenchModel: ObservableObject {
                 self.errorMessage = "Design study failed: \(Self.describe(error))"
             }
         }
+    }
+
+    func runEngineeringAssessment() {
+        assessmentTask?.cancel()
+        assessmentGeneration += 1
+        let generation = assessmentGeneration
+        let project = self.project
+        isAssessing = true
+        errorMessage = nil
+        assessmentTask = Task { [weak self] in
+            do {
+                let worker = Task.detached(priority: .userInitiated) {
+                    try EngineeringAssessment.run(project)
+                }
+                let artifact = try await withTaskCancellationHandler {
+                    try await worker.value
+                } onCancel: {
+                    worker.cancel()
+                }
+                guard !Task.isCancelled,
+                      let self,
+                      self.assessmentGeneration == generation else { return }
+                self.engineeringArtifact = artifact
+                self.isAssessing = false
+            } catch is CancellationError {
+                guard let self, self.assessmentGeneration == generation else { return }
+                self.isAssessing = false
+            } catch {
+                guard let self, self.assessmentGeneration == generation else { return }
+                self.isAssessing = false
+                self.errorMessage = "Engineering assessment failed: \(Self.describe(error))"
+            }
+        }
+    }
+
+    private func cancelAssessment() {
+        assessmentTask?.cancel()
+        assessmentTask = nil
+        assessmentGeneration += 1
+        engineeringArtifact = nil
+        isAssessing = false
     }
 
     func loadCantileverExample() {
@@ -711,6 +760,7 @@ final class WorkbenchModel: ObservableObject {
         coupledResult = nil
         scene = nil
         selection = nil
+        cancelAssessment()
         needsSolve = true
         clearDesign()
     }

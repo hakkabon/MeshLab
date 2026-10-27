@@ -16,6 +16,7 @@ let package = Package(
         .executable(name: "MeshLabBenchmarks", targets: ["MeshLabBenchmarks"]),
         .executable(name: "MeshLabSweep", targets: ["MeshLabSweep"]),
         .executable(name: "MeshLabValidate", targets: ["MeshLabValidate"]),
+        .executable(name: "MeshLabReport", targets: ["MeshLabReport"]),
     ],
     dependencies: [
         // NumericCore is the numerical substrate. See
@@ -72,6 +73,11 @@ let package = Package(
             name: "MeshLabValidate",
             dependencies: ["MeshLabCore"],
             path: "Sources/MeshLabValidate"
+        ),
+        .executableTarget(
+            name: "MeshLabReport",
+            dependencies: ["MeshLabCore"],
+            path: "Sources/MeshLabReport"
         ),
         .testTarget(
             name: "MeshLabCoreTests",
