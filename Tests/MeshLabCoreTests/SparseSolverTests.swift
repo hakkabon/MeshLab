@@ -81,3 +81,17 @@ private func smallSymmetricMatrix(scale: Double = 1) throws -> SparseMatrix {
     let report = try solver.solveWithReport([1, 2, 3])
     #expect(report.inertia == SparseInertiaReport(positive: 2, negative: 1, zero: 0))
 }
+
+@Test func multipleRightHandSidesReuseOneSolver() throws {
+    let matrix = try smallSymmetricMatrix()
+    let solver = try SparseSolver(matrix: matrix, method: .numericCoreLU)
+    let rightHandSides = [[1.0, 2.0, 3.0], [3.0, 2.0, 1.0]]
+    let solutions = try solver.solveMultiple(rightHandSides)
+    #expect(solutions.count == 2)
+    for (solution, rhs) in zip(solutions, rightHandSides) {
+        let product = matrix.multiply(solution)
+        for index in rhs.indices {
+            #expect(abs(product[index] - rhs[index]) < 1e-12)
+        }
+    }
+}

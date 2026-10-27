@@ -94,7 +94,7 @@ public struct EngineeringResultSummary: Sendable, Hashable, Codable {
 }
 
 public struct EngineeringRunArtifact: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public let schemaVersion: Int
     public let projectIdentifier: String
@@ -107,6 +107,8 @@ public struct EngineeringRunArtifact: Sendable, Hashable, Codable {
     public let analysis: AnalysisKind
     public let solverMethod: SparseSolverMethod
     public let numericContract: String
+    public let numericStack: NumericStackProvenance
+    public let displayUnits: EngineeringUnitSystem
     public let mesh: EngineeringMeshSummary
     public let result: EngineeringResultSummary
     public let checks: [EngineeringCheck]
@@ -130,6 +132,7 @@ public struct EngineeringRunArtifact: Sendable, Hashable, Codable {
             "- Solver: `\(String(describing: solverMethod))`",
             "- Project fingerprint: `\(projectFingerprint)`",
             "- Numeric contract: `\(numericContract)`",
+            "- Capability manifest: `\(numericStack.capabilityDigest)`",
             "- Overall status: **\(passed ? "PASS" : "FAIL")**",
             "",
             "## Model",
@@ -149,8 +152,8 @@ public struct EngineeringRunArtifact: Sendable, Hashable, Codable {
             lines.append([
                 escape(check.kind.rawValue),
                 check.status.rawValue,
-                check.observed.map(number) ?? "—",
-                check.limit.map(number) ?? "—",
+                formatted(check.observed, for: check.kind),
+                formatted(check.limit, for: check.kind),
                 check.utilization.map { number(100 * $0) + "%" } ?? "—",
             ].joined(separator: " | ").withTableEdges)
         }
@@ -165,6 +168,22 @@ public struct EngineeringRunArtifact: Sendable, Hashable, Codable {
 
     private func number(_ value: Double) -> String {
         String(format: "%.6g", locale: Locale(identifier: "en_US_POSIX"), value)
+    }
+
+    private func formatted(_ value: Double?, for kind: EngineeringCheckKind) -> String {
+        guard let value else { return "—" }
+        switch kind {
+        case .maximumDisplacement:
+            return "\(number(displayUnits.length.displayValue(fromSolver: value))) \(displayUnits.length.symbol)"
+        case .maximumVonMises:
+            return "\(number(displayUnits.stress.displayValue(fromSolver: value))) \(displayUnits.stress.symbol)"
+        case .maximumTemperature:
+            return "\(number(displayUnits.temperature.displayValue(fromSolver: value))) \(displayUnits.temperature.symbol)"
+        case .minimumFrequency:
+            return "\(number(value)) Hz"
+        case .maximumRelativeResidual, .minimumMeshQuality, .convergence:
+            return number(value)
+        }
     }
 }
 
@@ -183,6 +202,7 @@ public enum EngineeringAssessment {
             result: result
         )
         let metadata = project.engineeringMetadata
+        let numericStack = NumericStackProvenance.current
         return EngineeringRunArtifact(
             schemaVersion: EngineeringRunArtifact.currentSchemaVersion,
             projectIdentifier: metadata.identifier.isEmpty ? project.name : metadata.identifier,
@@ -194,7 +214,9 @@ public enum EngineeringAssessment {
             projectFingerprint: fingerprint(project),
             analysis: project.analysis,
             solverMethod: project.solverMethod,
-            numericContract: "swift-numeric-core-1.x",
+            numericContract: numericStack.contract,
+            numericStack: numericStack,
+            displayUnits: project.engineeringUnits,
             mesh: EngineeringMeshSummary(
                 nodeCount: project.mesh.nodes.count,
                 elementCount: project.mesh.elements.count,
@@ -281,6 +303,25 @@ public enum EngineeringAssessment {
                 minimumFrequency: value.modes.map(\.frequencyHz).min(),
                 maximumRelativeResidual: value.modes.map(\.relativeResidual).max(),
                 converged: !value.modes.isEmpty
+            )
+
+        case .transient:
+            let value = try TransientAnalysis(options: project.makeTransientOptions())
+                .solve(
+                    project.makeModel(),
+                    loadHistory: project.makeTransientLoadHistory()
+                )
+            let maximumDisplacement = value.states.flatMap(\.displacement).reduce(0.0) {
+                max($0, simd_length($1))
+            }
+            return EngineeringResultSummary(
+                maximumDisplacement: maximumDisplacement,
+                maximumVonMises: nil,
+                strainEnergy: value.states.map(\.strainEnergy).max(),
+                maximumTemperature: nil,
+                minimumFrequency: nil,
+                maximumRelativeResidual: value.maximumRelativeEquilibriumResidual,
+                converged: value.states.count == project.transientStudy.steps + 1
             )
 
         case .thermalStructural:

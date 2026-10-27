@@ -71,6 +71,8 @@ private func productionProject() throws -> MeshLabProject {
     let output = try ProductionLinearAnalysis.solve(project: project)
 
     #expect(output.results.map(\.id) == ["dead", "live", "uls"])
+    #expect(output.linearSystemPreparationCount == 1)
+    #expect(output.rightHandSideSolveCount == 3)
     let dead = try #require(output.result(id: "dead"))
     let live = try #require(output.result(id: "live"))
     let uls = try #require(output.result(id: "uls"))

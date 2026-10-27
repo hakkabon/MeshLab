@@ -3,6 +3,13 @@ import SwiftUI
 import UniformTypeIdentifiers
 import simd
 
+private enum EngineeringRequirementDimension {
+    case length
+    case stress
+    case temperature
+    case scalar
+}
+
 struct WorkbenchView: View {
     @ObservedObject var model: WorkbenchModel
 
@@ -11,6 +18,7 @@ struct WorkbenchView: View {
     @State private var isExportingResults = false
     @State private var isExportingVTK = false
     @State private var didAutoSolve = false
+    @State private var selectedProductionRegion = ""
 
     var body: some View {
         NavigationSplitView {
@@ -141,6 +149,26 @@ struct WorkbenchView: View {
                         ),
                         in: 1...50
                     )
+                }
+                if model.project.analysis == .transient {
+                    LabeledContent("Time step (s)") {
+                        TextField(
+                            "Time step",
+                            value: $model.project.transientStudy.timeStep,
+                            format: .number.precision(.fractionLength(1...6))
+                        )
+                        .multilineTextAlignment(.trailing)
+                    }
+                    Stepper(
+                        "Steps: \(model.project.transientStudy.steps)",
+                        value: $model.project.transientStudy.steps,
+                        in: 1...10_000
+                    )
+                    LabeledContent("Duration", value: String(
+                        format: "%.4g s",
+                        model.project.transientStudy.timeStep
+                            * Double(model.project.transientStudy.steps)
+                    ))
                 }
                 if model.project.analysis == .productionLinear {
                     LabeledContent(
@@ -371,6 +399,80 @@ struct WorkbenchView: View {
                 }
             }
 
+            if model.project.analysis == .productionLinear {
+                Section("Production Study Authoring") {
+                    if productionRegionNames.isEmpty {
+                        Text("Import a Gmsh mesh with named physical regions to author region-based studies.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("Region", selection: $selectedProductionRegion) {
+                            Text("Select region").tag("")
+                            ForEach(productionRegionNames, id: \.self) { name in
+                                Text(name).tag(name)
+                            }
+                        }
+                        Button("Add Fixed Region") {
+                            model.addProductionConstraint(regionName: productionRegion)
+                        }
+                        .disabled(productionRegion.isEmpty)
+                        Button("Add Region Load Case") {
+                            model.addProductionLoadCase(regionName: productionRegion)
+                        }
+                        .disabled(productionRegion.isEmpty)
+                    }
+                    ForEach(
+                        Array(model.project.linearStudy.regionConstraints.enumerated()),
+                        id: \.offset
+                    ) { index, constraint in
+                        HStack {
+                            Text("Fixed: \(constraint.regionName)")
+                            Spacer()
+                            Button(role: .destructive) {
+                                model.removeProductionConstraint(at: index)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    ForEach(
+                        Array(model.project.linearStudy.loadCases.enumerated()),
+                        id: \.offset
+                    ) { index, loadCase in
+                        HStack {
+                            Text("\(loadCase.id): \(loadCase.name)")
+                            Spacer()
+                            Button(role: .destructive) {
+                                model.removeProductionLoadCase(at: index)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    Button("Add 1.0× Combination") {
+                        model.addProductionCombination()
+                    }
+                    .disabled(model.project.linearStudy.loadCases.isEmpty)
+                    ForEach(
+                        Array(model.project.linearStudy.combinations.enumerated()),
+                        id: \.offset
+                    ) { index, combination in
+                        HStack {
+                            Text("\(combination.id): \(combination.terms.count) terms")
+                            Spacer()
+                            Button(role: .destructive) {
+                                model.removeProductionCombination(at: index)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+            }
+
             Section("Engineering Qualification") {
                 TextField(
                     "Project ID",
@@ -395,33 +497,48 @@ struct WorkbenchView: View {
                     value: "\(engineeringRequirementCount(requirements))"
                 )
                 DisclosureGroup("Acceptance limits") {
+                    Picker("Length", selection: $model.project.engineeringUnits.length) {
+                        ForEach(EngineeringLengthUnit.allCases, id: \.self) {
+                            Text($0.symbol).tag($0)
+                        }
+                    }
+                    Picker("Stress", selection: $model.project.engineeringUnits.stress) {
+                        ForEach(EngineeringStressUnit.allCases, id: \.self) {
+                            Text($0.symbol).tag($0)
+                        }
+                    }
+                    Picker("Temperature", selection: $model.project.engineeringUnits.temperature) {
+                        ForEach(EngineeringTemperatureUnit.allCases, id: \.self) {
+                            Text($0.symbol).tag($0)
+                        }
+                    }
                     Toggle(
                         "Require convergence",
                         isOn: $model.project.engineeringRequirements.requireConvergence
                     )
                     TextField(
-                        "Max displacement",
-                        text: engineeringRequirementBinding(\.maximumDisplacement)
+                        "Max displacement (\(model.project.engineeringUnits.length.symbol))",
+                        text: engineeringRequirementBinding(\.maximumDisplacement, dimension: .length)
                     )
                     TextField(
-                        "Max von Mises",
-                        text: engineeringRequirementBinding(\.maximumVonMises)
+                        "Max von Mises (\(model.project.engineeringUnits.stress.symbol))",
+                        text: engineeringRequirementBinding(\.maximumVonMises, dimension: .stress)
                     )
                     TextField(
-                        "Max temperature",
-                        text: engineeringRequirementBinding(\.maximumTemperature)
+                        "Max temperature (\(model.project.engineeringUnits.temperature.symbol))",
+                        text: engineeringRequirementBinding(\.maximumTemperature, dimension: .temperature)
                     )
                     TextField(
                         "Min frequency",
-                        text: engineeringRequirementBinding(\.minimumFrequency)
+                        text: engineeringRequirementBinding(\.minimumFrequency, dimension: .scalar)
                     )
                     TextField(
                         "Max relative residual",
-                        text: engineeringRequirementBinding(\.maximumRelativeResidual)
+                        text: engineeringRequirementBinding(\.maximumRelativeResidual, dimension: .scalar)
                     )
                     TextField(
                         "Min mesh quality",
-                        text: engineeringRequirementBinding(\.minimumMeshQuality)
+                        text: engineeringRequirementBinding(\.minimumMeshQuality, dimension: .scalar)
                     )
                 }
                 Button {
@@ -544,7 +661,7 @@ struct WorkbenchView: View {
                         Text(preset.title).tag(preset)
                     }
                 }
-                if model.project.analysis != .modal {
+                if ![.modal, .transient].contains(model.project.analysis) {
                     Toggle(
                         "Matrix-free CG",
                         isOn: Binding(
@@ -598,7 +715,7 @@ struct WorkbenchView: View {
                         set: { model.setShowStress($0) }
                     )
                 )
-                .disabled(model.project.analysis == .modal)
+                .disabled([.modal, .transient].contains(model.project.analysis))
                 LabeledContent(
                     "Deformation",
                     value: String(format: "%.0f×", model.project.deformationScale)
@@ -736,6 +853,52 @@ struct WorkbenchView: View {
                             value: model.lastSolveSeconds.map {
                                 String(format: "%.1f ms", $0 * 1_000)
                             } ?? "—"
+                        )
+                    } else {
+                        emptyResults
+                    }
+                case .transient:
+                    if let transient = model.transientResult,
+                       let state = model.selectedTransientState {
+                        Slider(
+                            value: Binding(
+                                get: { Double(model.selectedTransientStep) },
+                                set: { model.setSelectedTransientStep(Int($0.rounded())) }
+                            ),
+                            in: 0...Double(max(transient.states.count - 1, 0)),
+                            step: 1
+                        )
+                        LabeledContent(
+                            "Step",
+                            value: "\(model.selectedTransientStep) / \(transient.states.count - 1)"
+                        )
+                        LabeledContent(
+                            "Time",
+                            value: String(format: "%.6g s", state.time)
+                        )
+                        LabeledContent(
+                            "Peak displacement",
+                            value: String(
+                                format: "%.4g mm",
+                                state.displacement.reduce(0.0) {
+                                    max($0, simd_length($1))
+                                } * 1_000
+                            )
+                        )
+                        LabeledContent(
+                            "Kinetic energy",
+                            value: String(format: "%.6g J", state.kineticEnergy)
+                        )
+                        LabeledContent(
+                            "Strain energy",
+                            value: String(format: "%.6g J", state.strainEnergy)
+                        )
+                        LabeledContent(
+                            "Max equilibrium residual",
+                            value: String(
+                                format: "%.3g",
+                                transient.maximumRelativeEquilibriumResidual
+                            )
                         )
                     } else {
                         emptyResults
@@ -902,12 +1065,13 @@ struct WorkbenchView: View {
     }
 
     private func engineeringRequirementBinding(
-        _ keyPath: WritableKeyPath<EngineeringRequirements, Double?>
+        _ keyPath: WritableKeyPath<EngineeringRequirements, Double?>,
+        dimension: EngineeringRequirementDimension
     ) -> Binding<String> {
         Binding(
             get: {
                 model.project.engineeringRequirements[keyPath: keyPath].map {
-                    String(format: "%.8g", $0)
+                    String(format: "%.8g", displayRequirement($0, dimension: dimension))
                 } ?? ""
             },
             set: { text in
@@ -916,13 +1080,61 @@ struct WorkbenchView: View {
                 if trimmed.isEmpty {
                     requirements[keyPath: keyPath] = nil
                 } else if let value = Double(trimmed), value.isFinite {
-                    requirements[keyPath: keyPath] = value
+                    requirements[keyPath: keyPath] = solverRequirement(
+                        value,
+                        dimension: dimension
+                    )
                 } else {
                     return
                 }
                 model.project.engineeringRequirements = requirements
             }
         )
+    }
+
+    private func displayRequirement(
+        _ value: Double,
+        dimension: EngineeringRequirementDimension
+    ) -> Double {
+        switch dimension {
+        case .length:
+            model.project.engineeringUnits.length.displayValue(fromSolver: value)
+        case .stress:
+            model.project.engineeringUnits.stress.displayValue(fromSolver: value)
+        case .temperature:
+            model.project.engineeringUnits.temperature.displayValue(fromSolver: value)
+        case .scalar:
+            value
+        }
+    }
+
+    private func solverRequirement(
+        _ value: Double,
+        dimension: EngineeringRequirementDimension
+    ) -> Double {
+        switch dimension {
+        case .length:
+            model.project.engineeringUnits.length.solverValue(fromDisplay: value)
+        case .stress:
+            model.project.engineeringUnits.stress.solverValue(fromDisplay: value)
+        case .temperature:
+            model.project.engineeringUnits.temperature.solverValue(fromDisplay: value)
+        case .scalar:
+            value
+        }
+    }
+
+    private var productionRegionNames: [String] {
+        Array(Set(model.project.meshMetadata.regions
+            .filter { !$0.nodeIndices.isEmpty }
+            .map(\.name)))
+            .sorted()
+    }
+
+    private var productionRegion: String {
+        productionRegionNames.contains(selectedProductionRegion)
+            ? selectedProductionRegion
+            : ""
     }
 
     private var parametricSampleCount: Int {
@@ -1132,6 +1344,8 @@ struct WorkbenchView: View {
             return "Run staggered thermal and structural fields until their updates converge."
         case .modal:
             return "Run a modal analysis, then inspect the mass-normalized mode shapes."
+        case .transient:
+            return "Run transient dynamics, then scrub the displacement history through time."
         case .thermalStructural:
             return "Run steady conduction, then inspect the coupled thermal stress field."
         }
@@ -1214,6 +1428,7 @@ private extension AnalysisKind {
         case .nonlinearStatic: return "Nonlinear static"
         case .coupledThermoMechanical: return "Coupled thermo-mechanical"
         case .modal: return "Modal"
+        case .transient: return "Transient dynamics"
         case .thermalStructural: return "Thermal structural"
         }
     }

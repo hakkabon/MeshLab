@@ -47,13 +47,15 @@ public struct ValidationReport: Sendable, Hashable, Codable {
     public let schemaVersion: Int
     public let suite: String
     public let numericContract: String
+    public let numericStack: NumericStackProvenance
     public let cases: [ValidationCase]
     public let passed: Bool
 
     public init(cases: [ValidationCase]) {
-        self.schemaVersion = 1
+        self.schemaVersion = 2
         self.suite = "meshlab-consolidation"
-        self.numericContract = "swift-numeric-core-1.x"
+        self.numericStack = .current
+        self.numericContract = numericStack.contract
         self.cases = cases
         self.passed = cases.allSatisfy(\.passed)
     }
@@ -63,13 +65,85 @@ public struct ValidationReport: Sendable, Hashable, Codable {
         encoder.outputFormatting = prettyPrinted ? [.prettyPrinted, .sortedKeys] : [.sortedKeys]
         return try encoder.encode(self)
     }
+
+    /// Compares this run with a committed deterministic corpus snapshot.
+    /// Case/metric drift, numerical-stack drift, and observations outside the
+    /// declared metric tolerance fail closed.
+    public func compare(to baseline: ValidationReport) -> ValidationBaselineComparison {
+        var issues: [ValidationBaselineIssue] = []
+        if suite != baseline.suite {
+            issues.append(.init(path: "suite", message: "suite identifier changed"))
+        }
+        if numericStack != baseline.numericStack {
+            issues.append(.init(
+                path: "numericStack",
+                message: "numerical stack or capability manifest changed"
+            ))
+        }
+        let baselineCases = Dictionary(uniqueKeysWithValues: baseline.cases.map {
+            ($0.identifier, $0)
+        })
+        let currentIdentifiers = Set(cases.map(\.identifier))
+        let baselineIdentifiers = Set(baseline.cases.map(\.identifier))
+        for identifier in baselineIdentifiers.subtracting(currentIdentifiers).sorted() {
+            issues.append(.init(path: identifier, message: "validation case is missing"))
+        }
+        for identifier in currentIdentifiers.subtracting(baselineIdentifiers).sorted() {
+            issues.append(.init(path: identifier, message: "validation case is new"))
+        }
+        for currentCase in cases {
+            guard let baselineCase = baselineCases[currentCase.identifier] else { continue }
+            let baselineMetrics = Dictionary(uniqueKeysWithValues: baselineCase.metrics.map {
+                ($0.name, $0)
+            })
+            let currentNames = Set(currentCase.metrics.map(\.name))
+            let baselineNames = Set(baselineCase.metrics.map(\.name))
+            for name in baselineNames.subtracting(currentNames).sorted() {
+                issues.append(.init(
+                    path: "\(currentCase.identifier).\(name)",
+                    message: "metric is missing"
+                ))
+            }
+            for name in currentNames.subtracting(baselineNames).sorted() {
+                issues.append(.init(
+                    path: "\(currentCase.identifier).\(name)",
+                    message: "metric is new"
+                ))
+            }
+            for metric in currentCase.metrics {
+                guard let expected = baselineMetrics[metric.name] else { continue }
+                let tolerance = metric.absoluteTolerance
+                    + metric.relativeTolerance * abs(expected.observed)
+                let difference = abs(metric.observed - expected.observed)
+                if !difference.isFinite || difference > tolerance {
+                    issues.append(.init(
+                        path: "\(currentCase.identifier).\(metric.name)",
+                        message: "observation changed by \(difference), tolerance \(tolerance)"
+                    ))
+                }
+            }
+        }
+        return ValidationBaselineComparison(issues: issues)
+    }
+}
+
+public struct ValidationBaselineIssue: Sendable, Hashable, Codable {
+    public let path: String
+    public let message: String
+}
+
+public struct ValidationBaselineComparison: Sendable, Hashable, Codable {
+    public let issues: [ValidationBaselineIssue]
+    public var passed: Bool { issues.isEmpty }
 }
 
 public enum MeshLabValidation {
     public static func runStandardSuite() throws -> ValidationReport {
         ValidationReport(cases: [
             try operatorContractCase(),
+            try elementKernelContractCase(),
             try assembledMatrixFreeCase(),
+            try preparedLinearCase(),
             try linearThermalCase(),
             try meshQualityCase(),
             try finiteStrainSmallLoadCase(),
@@ -94,6 +168,85 @@ public enum MeshLabValidation {
             metrics: [
                 ValidationMetric(name: "row-0", observed: product[0], reference: 1, absoluteTolerance: 0),
                 ValidationMetric(name: "row-1", observed: product[1], reference: 7, absoluteTolerance: 0),
+            ]
+        )
+    }
+
+    private static func elementKernelContractCase() throws -> ValidationCase {
+        let mesh = try Mesh(
+            nodes: [
+                SIMD3<Double>(0, 0, 0),
+                SIMD3<Double>(1, 0, 0),
+                SIMD3<Double>(0, 1, 0),
+                SIMD3<Double>(0, 0, 1),
+            ],
+            elements: [Element(type: .tetrahedron4, nodes: [0, 1, 2, 3])]
+        )
+        let material = try ElasticMaterial(
+            youngModulus: 10e6,
+            poissonRatio: 0.3,
+            density: 2
+        )
+        let displacement = (0..<12).map { Double($0) * 1e-6 }
+        let result = try LinearContinuumElementKernel().evaluate(
+            FEMElementEvaluationRequest(
+                mesh: mesh,
+                elementIndex: 0,
+                material: material,
+                localDisplacement: displacement
+            )
+        )
+        let maximumResidualError = (0..<12).map { row in
+            let product = (0..<12).reduce(0.0) {
+                $0 + result.tangent[row * 12 + $1] * displacement[$1]
+            }
+            return abs(product - result.internalForce[row])
+        }.max() ?? 0
+        return ValidationCase(
+            identifier: "tet4-element-kernel-contract",
+            category: "interoperability",
+            metrics: [
+                ValidationMetric(
+                    name: "tangent-residual-consistency",
+                    observed: maximumResidualError,
+                    reference: 0,
+                    absoluteTolerance: 1e-10
+                ),
+            ]
+        )
+    }
+
+    private static func preparedLinearCase() throws -> ValidationCase {
+        let project = try MeshLabProject.cantileverExample()
+        let model = project.makeModel()
+        let options = AnalysisOptions(solverMethod: .numericCoreCholesky)
+        let prepared = try PreparedLinearStaticAnalysis(
+            model: FEMModel(
+                mesh: model.mesh,
+                material: model.material,
+                constraints: model.constraints
+            ),
+            options: options
+        )
+        let reused = try prepared.solve(loads: model.loads, bodyForce: model.bodyForce)
+        let independent = try StaticAnalysis(options: options).solve(model)
+        return ValidationCase(
+            identifier: "prepared-linear-factorization-reuse",
+            category: "structural",
+            metrics: [
+                ValidationMetric(
+                    name: "maximum-displacement",
+                    observed: reused.maxDisplacement,
+                    reference: independent.maxDisplacement,
+                    absoluteTolerance: 1e-14,
+                    relativeTolerance: 1e-10
+                ),
+                ValidationMetric(
+                    name: "preparation-count",
+                    observed: Double(prepared.preparationCount),
+                    reference: 1,
+                    absoluteTolerance: 0
+                ),
             ]
         )
     }

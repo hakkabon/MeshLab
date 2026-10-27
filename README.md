@@ -153,7 +153,27 @@ traceable analysis release:
 - the workbench edits provenance, runs qualification asynchronously, and shows
   check-level status; project schema v9 migrates v1–v8 documents safely.
 
-The package has 96 tests covering vector/dense/sparse math, mesh topology and
+P10.5 (Verification, consolidation, and shared contracts) is complete for the
+released NumericCore boundary:
+
+- qualification and validation evidence records exact Swift-NumericCore 1.0.0,
+  packaged Rust-NumericCore 0.34.0, the compatibility epoch, ordered capability
+  manifest, and deterministic manifest digest;
+- a committed standard validation corpus fails closed on stack, case, metric,
+  or out-of-tolerance numerical drift;
+- prepared linear systems and multiple-right-hand-side APIs reuse one stiffness
+  assembly and factorization across production cases and combinations;
+- a public element-kernel contract carries local residual, tangent, mass,
+  recovered stress, energy, and opaque constitutive state;
+- schema v10 adds presentation units and transient-study definitions while
+  retaining canonical SI solver values and v1–v9 migration;
+- transient dynamics is integrated into batch execution, qualification, CSV
+  export, and workbench time-state inspection;
+- the workbench can create basic named-region constraints, load cases, and
+  combinations, while upstream operator/Krylov and sparse-modal contracts are
+  specified for future NumericCore releases.
+
+The package has 103 tests covering vector/dense/sparse math, mesh topology and
 surface extraction, linear-static FEM equilibrium, solver backends and
 factorization reuse, modal/transient dynamics, thermal conduction and thermal
 stress, parametric sweeps, compliance adjoints, topology/shape optimization,
@@ -234,6 +254,7 @@ swift build -c release
 swift run MeshLabApp
 swift run MeshLabSweep --help
 swift run MeshLabValidate
+swift run MeshLabValidate --baseline Validation/baselines/standard.json
 swift run MeshLabReport --help
 ```
 
@@ -267,7 +288,7 @@ platform-specific GPU execution; those remain deployment-layer concerns.
 ## Engineering qualification
 
 `MeshLabReport` evaluates the analysis selected by a project and applies its
-schema-v9 `engineeringRequirements`. The JSON artifact is deterministic: it
+schema-v10 `engineeringRequirements`. The JSON artifact is deterministic: it
 does not include a wall-clock timestamp or host-specific data, so it can be
 reviewed in source control and compared across Swift-NumericCore and
 Rust-NumericCore releases.
@@ -316,6 +337,7 @@ the environment it was captured on.
 - Consistent-mass modal analysis with mass-normalized mode shapes and
   generalized residual/orthogonality diagnostics.
 - Newmark transient dynamics with Rayleigh damping and load histories.
+- Project-defined transient histories with batch, qualification, and CSV paths.
 - Steady thermal conduction with nodal heat, volumetric heat, and element
   heat-flux recovery.
 - One-way thermal-structural coupling with equivalent thermal loads and
@@ -345,6 +367,8 @@ the environment it was captured on.
   response limits, mesh/solver provenance, and JSON/Markdown reporting.
 - Production linear studies with named-region constraints and materials,
   independent load cases, factored combinations, and governing-result envelopes.
+- Prepared production systems reuse one assembly/factorization across every
+  right-hand side.
 - Static force/moment equilibrium and free-residual diagnostics, plus
   scale-independent element quality reports.
 - Solver diagnostics: backward error, refinement steps, factor nonzeros, and
@@ -354,8 +378,8 @@ the environment it was captured on.
 ### Workbench
 
 - SwiftUI app with a built-in cantilever example and editable material/loads.
-- Static, modal, and thermal-structural study selection with mode-shape
-  inspection and thermal boundary summary.
+- Static, modal, transient, and thermal-structural study selection with
+  mode-shape inspection, transient state scrubbing, and thermal boundary summary.
 - Nonlinear-static and staggered thermo-mechanical execution with load-step,
   Newton-iteration, coupling-convergence, and temperature summaries.
 - Production-linear study execution with case/combination selection, envelope
@@ -367,7 +391,7 @@ the environment it was captured on.
   pass/fail status.
 - Solver picker for Accelerate and NumericCore direct/iterative methods, plus
   a matrix-free CG path for static and thermal-structural studies.
-- Versioned JSON project import/export (schema v9, v1–v8 migration), ASCII
+- Versioned JSON project import/export (schema v10, v1–v9 migration), ASCII
   Gmsh mesh import, static/modal/thermal CSV, and legacy VTK result export.
 - Asynchronous solve with progress, cancellation of stale results, and errors.
 - Surface picking resolves the deformed hit point to a source node.
@@ -387,8 +411,9 @@ the environment it was captured on.
 - Modal analysis uses a dense LAPACK eigensolver, so memory and time grow
   cubically with the number of free DOFs.
 - Modal and transient analyses require homogeneous Dirichlet constraints.
-- Transient dynamics is a library API only; the workbench does not yet expose
-  load histories or time animation.
+- Transient dynamics supports project load-factor histories and workbench state
+  scrubbing, but not continuous playback, streaming storage, or transient stress
+  recovery.
 - Thermo-mechanical coupling is steady, staggered, and currently 3D-only. It
   couples through deformed conduction geometry, thermal strain, and an optional
   uniform temperature-dependent stiffness factor; it is not a monolithic
@@ -409,7 +434,7 @@ the environment it was captured on.
   qualification reports are deterministic JSON and Markdown.
 - Gmsh import is ASCII-only and limited to linear `triangle3`/`tetrahedron4`;
   binary Gmsh, OBJ/STL/CAD, higher-order elements, and VTU/XDMF are not
-  implemented. Project schema v9 files are not readable by older clients.
+  implemented. Project schema v10 files are not readable by older clients.
 - Design optimization is limited to linear-static compliance with homogeneous
   Dirichlet constraints and no thermal loading.
 - Topology optimization reports densities but does not render a density field;
@@ -421,11 +446,10 @@ the environment it was captured on.
 - Matrix-free solves use Jacobi-preconditioned CG and are limited to symmetric
   positive-definite static/thermal-stress systems; modal, transient, and
   topology solves still use assembled matrices.
-- Production load cases currently assemble and factor independently; shared
-  stiffness factorization and multiple-right-hand-side solves are not yet used.
 - Region forces are distributed nodal totals, not automatically integrated
-  pressure loads. Production-study authoring is currently API/JSON based; the
-  workbench runs and reviews configured definitions but does not yet edit them.
+  pressure loads. Workbench production authoring covers basic region constraints,
+  load cases, and combinations, but detailed vector/factor/material editing
+  remains API/JSON based.
 - NumericCore's MPS backend is not yet usable, so no GPU numerical path is
   shipped. The matrix-free CPU path is the current scale-out option.
 - Batch sweeps hold the full job and result set in memory. Resume operates at
@@ -462,6 +486,8 @@ Tests/
 Benchmarks/
   MeshLabBenchmarks/  release-mode timing harness
   baselines/          committed environment-specific results
+Validation/
+  baselines/          committed deterministic numerical integration corpus
 docs/
   decisions/          architecture decision records
 Scripts/
@@ -501,10 +527,15 @@ Scripts/
 - **P10 — Engineering platform (complete):** project provenance and acceptance
   criteria, deterministic qualification artifacts, JSON/Markdown reports,
   schema v9, workbench qualification, and the `MeshLabReport` CI worker.
+- **P10.5 — Verification and shared contracts (complete):** exact NumericCore
+  provenance, committed validation corpus, factorization/multi-RHS reuse,
+  schema-v10 unit and transient definitions, public element state/tangent seam,
+  transient workbench inspection, and basic production-study authoring.
 - **P11 — Advanced constitutive physics and acceleration:** sparse/matrix-free
-  nonlinear tangents, adaptive continuation, hyperelasticity/plasticity/contact,
-  monolithic and transient multiphysics, Metal/MPS numerical paths, reusable
-  multi-RHS solves, distributed artifacts, and mid-request checkpoints.
+  nonlinear tangents, released NumericCore operator/Krylov and sparse-modal APIs,
+  adaptive continuation, hyperelasticity/plasticity/contact, monolithic and
+  transient multiphysics, Metal/MPS numerical paths, distributed artifacts, and
+  mid-request checkpoints.
 
 ## Contributing
 

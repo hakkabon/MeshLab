@@ -19,6 +19,7 @@ private enum SolveOutcome: Sendable {
     case nonlinear(NonlinearStaticResult)
     case coupled(CoupledThermoMechanicalResult)
     case modal(ModalResult)
+    case transient(TransientResult)
     case thermal(thermal: ThermalResult, stress: StaticResult)
 }
 
@@ -46,6 +47,8 @@ final class WorkbenchModel: ObservableObject {
     }
     @Published private(set) var result: StaticResult?
     @Published private(set) var modalResult: ModalResult?
+    @Published private(set) var transientResult: TransientResult?
+    @Published private(set) var selectedTransientStep = 0
     @Published private(set) var thermalResult: ThermalResult?
     @Published private(set) var linearResult: ProductionLinearResult?
     @Published private(set) var nonlinearResult: NonlinearStaticResult?
@@ -90,7 +93,8 @@ final class WorkbenchModel: ObservableObject {
 
     var renderOptions: RenderOptions {
         RenderOptions(
-            showStress: (project.analysis != .modal || designStaticResult != nil)
+            showStress: (![.modal, .transient].contains(project.analysis)
+                || designStaticResult != nil)
                 && project.showStress,
             deformationScale: project.deformationScale
         )
@@ -115,6 +119,15 @@ final class WorkbenchModel: ObservableObject {
             return nil
         }
         return modalResult.modes[project.selectedMode]
+    }
+
+    var selectedTransientState: TransientState? {
+        guard project.analysis == .transient,
+              let transientResult,
+              transientResult.states.indices.contains(selectedTransientStep) else {
+            return nil
+        }
+        return transientResult.states[selectedTransientStep]
     }
 
     var inspection: NodeInspection? {
@@ -146,6 +159,18 @@ final class WorkbenchModel: ObservableObject {
                 modeFrequency: mode.frequencyHz
             )
         }
+        if let state = selectedTransientState,
+           state.displacement.indices.contains(node) {
+            return NodeInspection(
+                node: node,
+                surfaceVertex: selection.surfaceVertex,
+                position: displayMesh.nodes[node],
+                displacement: state.displacement[node],
+                vonMises: nil,
+                temperature: nil,
+                modeFrequency: nil
+            )
+        }
         guard let result,
               result.displacements.indices.contains(node),
               result.nodalVonMises.indices.contains(node) else {
@@ -172,6 +197,8 @@ final class WorkbenchModel: ObservableObject {
             return result != nil
         case .modal:
             return modalResult != nil
+        case .transient:
+            return transientResult != nil
         }
     }
 
@@ -202,6 +229,9 @@ final class WorkbenchModel: ObservableObject {
         case .modal:
             guard let modalResult else { return "" }
             return AnalysisResultExport.modalCSV(project: project, result: modalResult)
+        case .transient:
+            guard let transientResult else { return "" }
+            return AnalysisResultExport.transientCSV(project: project, result: transientResult)
         case .thermalStructural:
             guard let result, let thermalResult else { return "" }
             return AnalysisResultExport.thermalCSV(
@@ -431,6 +461,12 @@ final class WorkbenchModel: ObservableObject {
         project.selectedMode = min(max(index, 0), modalResult.modes.count - 1)
     }
 
+    func setSelectedTransientStep(_ index: Int) {
+        guard let transientResult, !transientResult.states.isEmpty else { return }
+        selectedTransientStep = min(max(index, 0), transientResult.states.count - 1)
+        refreshTransientScene()
+    }
+
     func setSelectedLinearResult(_ id: String) {
         guard let selected = linearResult?.result(id: id) else { return }
         project.selectedLinearResultID = id
@@ -446,6 +482,63 @@ final class WorkbenchModel: ObservableObject {
         } catch {
             errorMessage = "Could not prepare the render scene: \(Self.describe(error))"
         }
+    }
+
+    func addProductionConstraint(regionName: String) {
+        guard !regionName.isEmpty else { return }
+        project.linearStudy.regionConstraints.append(
+            RegionConstraint(regionName: regionName)
+        )
+    }
+
+    func removeProductionConstraint(at index: Int) {
+        guard project.linearStudy.regionConstraints.indices.contains(index) else { return }
+        project.linearStudy.regionConstraints.remove(at: index)
+    }
+
+    func addProductionLoadCase(regionName: String) {
+        guard !regionName.isEmpty else { return }
+        let existing = Set(project.linearStudy.loadCases.map(\.id))
+        var sequence = project.linearStudy.loadCases.count + 1
+        while existing.contains("case-\(sequence)") { sequence += 1 }
+        project.linearStudy.loadCases.append(LinearLoadCase(
+            id: "case-\(sequence)",
+            name: "Load Case \(sequence)",
+            regionLoads: [RegionLoad(
+                regionName: regionName,
+                totalForce: SIMD3<Double>(0, 0, -1_000)
+            )]
+        ))
+    }
+
+    func removeProductionLoadCase(at index: Int) {
+        guard project.linearStudy.loadCases.indices.contains(index) else { return }
+        let identifier = project.linearStudy.loadCases[index].id
+        project.linearStudy.loadCases.remove(at: index)
+        project.linearStudy.combinations = project.linearStudy.combinations.compactMap {
+            var combination = $0
+            combination.terms.removeAll { $0.loadCaseID == identifier }
+            return combination.terms.isEmpty ? nil : combination
+        }
+    }
+
+    func addProductionCombination() {
+        guard !project.linearStudy.loadCases.isEmpty else { return }
+        let existing = Set(project.linearStudy.combinations.map(\.id))
+        var sequence = project.linearStudy.combinations.count + 1
+        while existing.contains("combination-\(sequence)") { sequence += 1 }
+        project.linearStudy.combinations.append(LinearLoadCombination(
+            id: "combination-\(sequence)",
+            name: "Combination \(sequence)",
+            terms: project.linearStudy.loadCases.map {
+                LinearCombinationTerm(loadCaseID: $0.id, factor: 1)
+            }
+        ))
+    }
+
+    func removeProductionCombination(at index: Int) {
+        guard project.linearStudy.combinations.indices.contains(index) else { return }
+        project.linearStudy.combinations.remove(at: index)
     }
 
     func setSolverPreset(_ preset: SolverPreset) {
@@ -587,6 +680,7 @@ final class WorkbenchModel: ObservableObject {
                 linearResult = nil
                 nonlinearResult = nil
                 coupledResult = nil
+                transientResult = nil
                 scene = RenderScene(
                     surface: surface,
                     result: staticResult,
@@ -604,12 +698,14 @@ final class WorkbenchModel: ObservableObject {
                 } ?? RenderScene(surface: surface, revision: revision)
                 nonlinearResult = nil
                 coupledResult = nil
+                transientResult = nil
             case .nonlinear(let nonlinear):
                 nonlinearResult = nonlinear
                 coupledResult = nil
                 linearResult = nil
                 modalResult = nil
                 thermalResult = nil
+                transientResult = nil
                 result = nonlinear.staticResult
                 scene = RenderScene(
                     surface: surface,
@@ -622,6 +718,7 @@ final class WorkbenchModel: ObservableObject {
                 linearResult = nil
                 modalResult = nil
                 thermalResult = coupled.thermalResult
+                transientResult = nil
                 result = coupled.staticResult
                 scene = RenderScene(
                     surface: surface,
@@ -635,10 +732,28 @@ final class WorkbenchModel: ObservableObject {
                 linearResult = nil
                 nonlinearResult = nil
                 coupledResult = nil
+                transientResult = nil
                 if !modalResult.modes.indices.contains(project.selectedMode) {
                     project.selectedMode = 0
                 }
                 scene = makeModalScene(surface: surface, modalResult: modalResult)
+            case .transient(let transient):
+                transientResult = transient
+                selectedTransientStep = max(0, transient.states.count - 1)
+                result = nil
+                modalResult = nil
+                thermalResult = nil
+                linearResult = nil
+                nonlinearResult = nil
+                coupledResult = nil
+                scene = transient.states.last.map {
+                    RenderScene(
+                        surface: surface,
+                        displacements: $0.displacement,
+                        scalar: [Double](repeating: 0, count: project.mesh.nodes.count),
+                        revision: revision
+                    )
+                } ?? RenderScene(surface: surface, revision: revision)
             case .thermal(let thermalResult, let stress):
                 self.thermalResult = thermalResult
                 self.result = stress
@@ -646,6 +761,7 @@ final class WorkbenchModel: ObservableObject {
                 linearResult = nil
                 nonlinearResult = nil
                 coupledResult = nil
+                transientResult = nil
                 scene = RenderScene(
                     surface: surface,
                     result: stress,
@@ -672,6 +788,23 @@ final class WorkbenchModel: ObservableObject {
             selection = nil
         } catch {
             errorMessage = "Could not prepare the render scene: \(Self.describe(error))"
+        }
+    }
+
+    private func refreshTransientScene() {
+        guard let state = selectedTransientState else { return }
+        do {
+            let surface = try project.mesh.makeSurfaceMesh()
+            revision += 1
+            scene = RenderScene(
+                surface: surface,
+                displacements: state.displacement,
+                scalar: [Double](repeating: 0, count: project.mesh.nodes.count),
+                revision: revision
+            )
+            selection = nil
+        } catch {
+            errorMessage = "Could not prepare the transient scene: \(Self.describe(error))"
         }
     }
 
@@ -754,6 +887,8 @@ final class WorkbenchModel: ObservableObject {
     private func clearResults() {
         result = nil
         modalResult = nil
+        transientResult = nil
+        selectedTransientStep = 0
         thermalResult = nil
         linearResult = nil
         nonlinearResult = nil
@@ -796,6 +931,14 @@ final class WorkbenchModel: ObservableObject {
                 modeCount: project.modalModeCount
             )).solve(project.makeModel())
             return .modal(result)
+
+        case .transient:
+            return .transient(try TransientAnalysis(
+                options: project.makeTransientOptions()
+            ).solve(
+                project.makeModel(),
+                loadHistory: project.makeTransientLoadHistory()
+            ))
 
         case .thermalStructural:
             let thermal = try ThermalAnalysis(options: project.makeAnalysisOptions())
@@ -922,6 +1065,7 @@ private extension MeshLabProject {
             && matrixFreeOptions == other.matrixFreeOptions
             && analysis == other.analysis
             && modalModeCount == other.modalModeCount
+            && transientStudy == other.transientStudy
             && thermalStudy == other.thermalStudy
             && linearStudy == other.linearStudy
             && nonlinearOptions == other.nonlinearOptions

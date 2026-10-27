@@ -47,6 +47,9 @@ jobs:
       - name: Test
         run: swift test
 
+      - name: Deterministic validation corpus
+        run: swift run MeshLabValidate --baseline Validation/baselines/standard.json
+
       - name: Build (release)
         run: swift build -c release
 

@@ -151,6 +151,10 @@ public struct LinearResultEnvelope: Sendable {
 public struct ProductionLinearResult: Sendable {
     public let results: [LinearStudyResult]
     public let envelope: LinearResultEnvelope
+    /// Number of stiffness assemblies/factorizations used for the study.
+    public let linearSystemPreparationCount: Int
+    /// Number of right-hand sides solved through the prepared system.
+    public let rightHandSideSolveCount: Int
 
     public func result(id: String?) -> LinearStudyResult? {
         if let id, let match = results.first(where: { $0.id == id }) { return match }
@@ -182,6 +186,31 @@ public enum ProductionLinearAnalysis {
 
         let constraints = try resolveConstraints(project: project)
         let elementMaterials = try resolveElementMaterials(project: project)
+        let prepared = project.useMatrixFree ? nil : try PreparedLinearStaticAnalysis(
+            model: FEMModel(
+                mesh: project.mesh,
+                material: project.material,
+                elementMaterials: elementMaterials,
+                constraints: constraints
+            ),
+            options: project.makeAnalysisOptions()
+        )
+        func solveResolved(
+            loads: [Load],
+            bodyForce: SIMD3<Double>
+        ) throws -> StaticResult {
+            if let prepared {
+                return try prepared.solve(loads: loads, bodyForce: bodyForce)
+            }
+            return try StaticAnalysis(options: project.makeAnalysisOptions()).solve(FEMModel(
+                mesh: project.mesh,
+                material: project.material,
+                elementMaterials: elementMaterials,
+                constraints: constraints,
+                loads: loads,
+                bodyForce: bodyForce
+            ))
+        }
         var resolvedCases: [String: (loads: [Load], bodyForce: SIMD3<Double>)] = [:]
         var results: [LinearStudyResult] = []
         results.reserveCapacity(study.loadCases.count + study.combinations.count)
@@ -190,10 +219,7 @@ public enum ProductionLinearAnalysis {
             try Task.checkCancellation()
             let resolved = try resolve(loadCase: loadCase, project: project)
             resolvedCases[loadCase.id] = resolved
-            let result = try solve(
-                project: project,
-                constraints: constraints,
-                elementMaterials: elementMaterials,
+            let result = try solveResolved(
                 loads: resolved.loads,
                 bodyForce: resolved.bodyForce
             )
@@ -222,10 +248,7 @@ public enum ProductionLinearAnalysis {
                 loads.append(contentsOf: loadCase.loads.map { $0.scaled(by: term.factor) })
                 bodyForce += loadCase.bodyForce * term.factor
             }
-            let result = try solve(
-                project: project,
-                constraints: constraints,
-                elementMaterials: elementMaterials,
+            let result = try solveResolved(
                 loads: loads,
                 bodyForce: bodyForce
             )
@@ -237,7 +260,12 @@ public enum ProductionLinearAnalysis {
             ))
         }
 
-        return ProductionLinearResult(results: results, envelope: envelope(results))
+        return ProductionLinearResult(
+            results: results,
+            envelope: envelope(results),
+            linearSystemPreparationCount: prepared?.preparationCount ?? results.count,
+            rightHandSideSolveCount: prepared?.solveCount ?? results.count
+        )
     }
 
     private static func validateIdentifiers(_ study: ProductionLinearStudy) throws {
@@ -343,23 +371,6 @@ public enum ProductionLinearAnalysis {
             throw ProductionLinearError.emptyRegion(name)
         }
         return nodes
-    }
-
-    private static func solve(
-        project: MeshLabProject,
-        constraints: [DirichletCondition],
-        elementMaterials: [ElasticMaterial],
-        loads: [Load],
-        bodyForce: SIMD3<Double>
-    ) throws -> StaticResult {
-        try StaticAnalysis(options: project.makeAnalysisOptions()).solve(FEMModel(
-            mesh: project.mesh,
-            material: project.material,
-            elementMaterials: elementMaterials,
-            constraints: constraints,
-            loads: loads,
-            bodyForce: bodyForce
-        ))
     }
 
     private static func envelope(_ values: [LinearStudyResult]) -> LinearResultEnvelope {

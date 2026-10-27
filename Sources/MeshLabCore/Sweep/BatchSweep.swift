@@ -1,4 +1,5 @@
 import Foundation
+import simd
 
 public enum SweepTaskKind: String, Sendable, Hashable, Codable, CaseIterable {
     case analysis
@@ -255,6 +256,17 @@ public enum SweepRunner {
             )).solve(project.makeModel())
             modeCount = result.modes.count
             strainEnergy = nil
+
+        case .transient:
+            let result = try TransientAnalysis(options: project.makeTransientOptions())
+                .solve(
+                    project.makeModel(),
+                    loadHistory: project.makeTransientLoadHistory()
+                )
+            maxDisplacement = result.states.flatMap(\.displacement).reduce(0.0) {
+                max($0, simd_length($1))
+            }
+            strainEnergy = result.states.map(\.strainEnergy).max()
 
         case .thermalStructural:
             let thermal = try ThermalAnalysis(options: project.makeAnalysisOptions())

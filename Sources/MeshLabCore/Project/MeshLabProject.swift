@@ -11,7 +11,31 @@ public enum AnalysisKind: String, Sendable, Hashable, Codable, CaseIterable {
     case nonlinearStatic = "nonlinear-static"
     case coupledThermoMechanical = "coupled-thermo-mechanical"
     case modal
+    case transient
     case thermalStructural
+}
+
+public struct TransientStudy: Sendable, Hashable, Codable {
+    public var timeStep: Double
+    public var steps: Int
+    public var massDamping: Double
+    public var stiffnessDamping: Double
+    /// Optional scale at times zero through `steps`. Empty selects a unit step.
+    public var loadFactors: [Double]
+
+    public init(
+        timeStep: Double = 0.01,
+        steps: Int = 100,
+        massDamping: Double = 0,
+        stiffnessDamping: Double = 0,
+        loadFactors: [Double] = []
+    ) {
+        self.timeStep = timeStep
+        self.steps = steps
+        self.massDamping = massDamping
+        self.stiffnessDamping = stiffnessDamping
+        self.loadFactors = loadFactors
+    }
 }
 
 public struct ThermalStudy: Sendable, Hashable, Codable {
@@ -38,7 +62,7 @@ public struct ThermalStudy: Sendable, Hashable, Codable {
 /// The project owns the mesh and analysis definition. Display settings travel
 /// with the document so reopening a project restores the same review state.
 public struct MeshLabProject: Sendable, Equatable, Codable {
-    public static let currentSchemaVersion = 9
+    public static let currentSchemaVersion = 10
 
     public var schemaVersion: Int
     public var name: String
@@ -56,6 +80,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
     public var analysis: AnalysisKind
     public var modalModeCount: Int
     public var selectedMode: Int
+    public var transientStudy: TransientStudy
     public var thermalStudy: ThermalStudy
     public var designStudy: DesignStudy
     public var useMatrixFree: Bool
@@ -66,6 +91,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
     public var coupledOptions: CoupledThermoMechanicalOptions
     public var engineeringMetadata: EngineeringProjectMetadata
     public var engineeringRequirements: EngineeringRequirements
+    public var engineeringUnits: EngineeringUnitSystem
 
     public init(
         name: String = "Untitled",
@@ -83,6 +109,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         analysis: AnalysisKind = .staticAnalysis,
         modalModeCount: Int = 6,
         selectedMode: Int = 0,
+        transientStudy: TransientStudy = TransientStudy(),
         thermalStudy: ThermalStudy = ThermalStudy(),
         designStudy: DesignStudy = DesignStudy(),
         useMatrixFree: Bool = false,
@@ -92,7 +119,8 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         nonlinearOptions: NonlinearStaticOptions = NonlinearStaticOptions(),
         coupledOptions: CoupledThermoMechanicalOptions = CoupledThermoMechanicalOptions(),
         engineeringMetadata: EngineeringProjectMetadata = EngineeringProjectMetadata(),
-        engineeringRequirements: EngineeringRequirements = EngineeringRequirements()
+        engineeringRequirements: EngineeringRequirements = EngineeringRequirements(),
+        engineeringUnits: EngineeringUnitSystem = .si
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.name = name
@@ -110,6 +138,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         self.analysis = analysis
         self.modalModeCount = modalModeCount
         self.selectedMode = selectedMode
+        self.transientStudy = transientStudy
         self.thermalStudy = thermalStudy
         self.designStudy = designStudy
         self.useMatrixFree = useMatrixFree
@@ -120,6 +149,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         self.coupledOptions = coupledOptions
         self.engineeringMetadata = engineeringMetadata
         self.engineeringRequirements = engineeringRequirements
+        self.engineeringUnits = engineeringUnits
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -139,6 +169,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         case analysis
         case modalModeCount
         case selectedMode
+        case transientStudy
         case thermalStudy
         case designStudy
         case useMatrixFree
@@ -149,6 +180,7 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         case coupledOptions
         case engineeringMetadata
         case engineeringRequirements
+        case engineeringUnits
     }
 
     public init(from decoder: Decoder) throws {
@@ -185,6 +217,10 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
             Int.self,
             forKey: .selectedMode
         ) ?? 0
+        self.transientStudy = try container.decodeIfPresent(
+            TransientStudy.self,
+            forKey: .transientStudy
+        ) ?? TransientStudy()
         self.thermalStudy = try container.decodeIfPresent(
             ThermalStudy.self,
             forKey: .thermalStudy
@@ -225,6 +261,10 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
             EngineeringRequirements.self,
             forKey: .engineeringRequirements
         ) ?? EngineeringRequirements()
+        self.engineeringUnits = try container.decodeIfPresent(
+            EngineeringUnitSystem.self,
+            forKey: .engineeringUnits
+        ) ?? .si
     }
 
     public func makeModel() -> FEMModel {
@@ -261,6 +301,35 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
             directSettings: directSettings,
             matrixFreeOptions: useMatrixFree ? matrixFreeOptions : nil
         )
+    }
+
+    public func makeTransientOptions() -> TransientOptions {
+        TransientOptions(
+            timeStep: transientStudy.timeStep,
+            steps: transientStudy.steps,
+            massDamping: transientStudy.massDamping,
+            stiffnessDamping: transientStudy.stiffnessDamping,
+            solverMethod: solverMethod,
+            directSettings: directSettings
+        )
+    }
+
+    public func makeTransientLoadHistory() throws -> [[Load]] {
+        guard transientStudy.steps > 0 else {
+            throw FEMError.invalidModel("Transient step count must be positive")
+        }
+        let factors = transientStudy.loadFactors.isEmpty
+            ? [Double](repeating: 1, count: transientStudy.steps + 1)
+            : transientStudy.loadFactors
+        guard factors.count == transientStudy.steps + 1,
+              factors.allSatisfy(\.isFinite) else {
+            throw FEMError.invalidModel(
+                "Transient load factors must contain steps + 1 finite values"
+            )
+        }
+        return factors.map { factor in
+            loads.map { $0.scaled(by: loadScale * factor) }
+        }
     }
 
     public static func cantileverExample() throws -> MeshLabProject {
@@ -448,6 +517,31 @@ public enum AnalysisResultExport {
                 number(mode.angularFrequency),
                 number(peak),
             ].joined(separator: ","))
+        }
+        return rows.joined(separator: "\n") + "\n"
+    }
+
+    /// Exports every transient state and nodal kinematic field in long form.
+    public static func transientCSV(
+        project: MeshLabProject,
+        result: TransientResult
+    ) -> String {
+        var rows = ["step,time,node,x,y,z,ux,uy,uz,vx,vy,vz,ax,ay,az"]
+        rows.reserveCapacity(result.states.count * project.mesh.nodes.count + 1)
+        for (step, state) in result.states.enumerated() {
+            for node in project.mesh.nodes.indices {
+                let position = project.mesh.nodes[node]
+                let displacement = state.displacement[node]
+                let velocity = state.velocity[node]
+                let acceleration = state.acceleration[node]
+                rows.append([
+                    String(step), number(state.time), String(node),
+                    number(position.x), number(position.y), number(position.z),
+                    number(displacement.x), number(displacement.y), number(displacement.z),
+                    number(velocity.x), number(velocity.y), number(velocity.z),
+                    number(acceleration.x), number(acceleration.y), number(acceleration.z),
+                ].joined(separator: ","))
+            }
         }
         return rows.joined(separator: "\n") + "\n"
     }

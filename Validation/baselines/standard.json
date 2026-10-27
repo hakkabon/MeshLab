@@ -1,0 +1,318 @@
+{
+  "cases" : [
+    {
+      "category" : "interoperability",
+      "identifier" : "operator-contract-2x2",
+      "metrics" : [
+        {
+          "absoluteTolerance" : 0,
+          "name" : "row-0",
+          "observed" : 1,
+          "passed" : true,
+          "reference" : 1,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 0,
+          "name" : "row-1",
+          "observed" : 7,
+          "passed" : true,
+          "reference" : 7,
+          "relativeTolerance" : 0
+        }
+      ],
+      "passed" : true
+    },
+    {
+      "category" : "interoperability",
+      "identifier" : "tet4-element-kernel-contract",
+      "metrics" : [
+        {
+          "absoluteTolerance" : 1e-10,
+          "name" : "tangent-residual-consistency",
+          "observed" : 3.552713678800501e-15,
+          "passed" : true,
+          "reference" : 0,
+          "relativeTolerance" : 0
+        }
+      ],
+      "passed" : true
+    },
+    {
+      "category" : "structural",
+      "identifier" : "cantilever-assembled-matrix-free",
+      "metrics" : [
+        {
+          "absoluteTolerance" : 1e-14,
+          "name" : "maximum-displacement",
+          "observed" : 2.001965673282674e-06,
+          "passed" : true,
+          "reference" : 2.0019656732809485e-06,
+          "relativeTolerance" : 1e-07
+        },
+        {
+          "absoluteTolerance" : 1e-14,
+          "name" : "strain-energy",
+          "observed" : 0.08164068451556335,
+          "passed" : true,
+          "reference" : 0.08164068451556411,
+          "relativeTolerance" : 1e-07
+        },
+        {
+          "absoluteTolerance" : 1e-08,
+          "name" : "maximum-von-mises",
+          "observed" : 155832.67495700676,
+          "passed" : true,
+          "reference" : 155832.6749563696,
+          "relativeTolerance" : 1e-07
+        },
+        {
+          "absoluteTolerance" : 1e-06,
+          "name" : "force-imbalance",
+          "observed" : 2.9918125088233095e-10,
+          "passed" : true,
+          "reference" : 0,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 1e-06,
+          "name" : "moment-imbalance",
+          "observed" : 6.650465067100221e-10,
+          "passed" : true,
+          "reference" : 0,
+          "relativeTolerance" : 0
+        }
+      ],
+      "passed" : true
+    },
+    {
+      "category" : "structural",
+      "identifier" : "prepared-linear-factorization-reuse",
+      "metrics" : [
+        {
+          "absoluteTolerance" : 1e-14,
+          "name" : "maximum-displacement",
+          "observed" : 2.0019656732809485e-06,
+          "passed" : true,
+          "reference" : 2.0019656732809485e-06,
+          "relativeTolerance" : 1e-10
+        },
+        {
+          "absoluteTolerance" : 0,
+          "name" : "preparation-count",
+          "observed" : 1,
+          "passed" : true,
+          "reference" : 1,
+          "relativeTolerance" : 0
+        }
+      ],
+      "passed" : true
+    },
+    {
+      "category" : "thermal",
+      "identifier" : "linear-thermal-bar",
+      "metrics" : [
+        {
+          "absoluteTolerance" : 1e-09,
+          "name" : "maximum-temperature-error",
+          "observed" : 1.5631940186722204e-13,
+          "passed" : true,
+          "reference" : 0,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 1e-08,
+          "name" : "maximum-flux-error",
+          "observed" : 8.640199666842818e-12,
+          "passed" : true,
+          "reference" : 0,
+          "relativeTolerance" : 0
+        }
+      ],
+      "passed" : true
+    },
+    {
+      "category" : "mesh",
+      "identifier" : "structured-mesh-quality",
+      "metrics" : [
+        {
+          "absoluteTolerance" : 1e-12,
+          "name" : "minimum-quality",
+          "observed" : 0.1924500897298753,
+          "passed" : true,
+          "reference" : 0.19245008972987526,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 0,
+          "name" : "inverted-elements",
+          "observed" : 0,
+          "passed" : true,
+          "reference" : 0,
+          "relativeTolerance" : 0
+        }
+      ],
+      "passed" : true
+    },
+    {
+      "category" : "nonlinear-structural",
+      "identifier" : "finite-strain-small-load",
+      "metrics" : [
+        {
+          "absoluteTolerance" : 1e-12,
+          "name" : "maximum-displacement",
+          "observed" : 5.999946000844263e-06,
+          "passed" : true,
+          "reference" : 6.000000000000002e-06,
+          "relativeTolerance" : 0.0001
+        },
+        {
+          "absoluteTolerance" : 1e-09,
+          "name" : "relative-free-residual",
+          "observed" : 1.129712925854101e-11,
+          "passed" : true,
+          "reference" : 0,
+          "relativeTolerance" : 0
+        }
+      ],
+      "passed" : true
+    },
+    {
+      "category" : "design",
+      "identifier" : "constrained-parametric-pareto",
+      "metrics" : [
+        {
+          "absoluteTolerance" : 0,
+          "name" : "feasible-samples",
+          "observed" : 2,
+          "passed" : true,
+          "reference" : 2,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 0,
+          "name" : "pareto-samples",
+          "observed" : 1,
+          "passed" : true,
+          "reference" : 1,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 0,
+          "name" : "best-index",
+          "observed" : 0,
+          "passed" : true,
+          "reference" : 0,
+          "relativeTolerance" : 0
+        }
+      ],
+      "passed" : true
+    },
+    {
+      "category" : "engineering-platform",
+      "identifier" : "qualified-static-artifact",
+      "metrics" : [
+        {
+          "absoluteTolerance" : 0,
+          "name" : "passed",
+          "observed" : 1,
+          "passed" : true,
+          "reference" : 1,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 0,
+          "name" : "failed-checks",
+          "observed" : 0,
+          "passed" : true,
+          "reference" : 0,
+          "relativeTolerance" : 0
+        }
+      ],
+      "passed" : true
+    }
+  ],
+  "numericContract" : "swift-numeric-core-1.0.0\/rust-numeric-core-0.34.0",
+  "numericStack" : {
+    "capabilities" : [
+      {
+        "contractVersion" : 1,
+        "identifier" : "ampl-modeling",
+        "stability" : "provisional"
+      },
+      {
+        "contractVersion" : 1,
+        "identifier" : "circuit-analysis",
+        "stability" : "provisional"
+      },
+      {
+        "contractVersion" : 1,
+        "identifier" : "dae-integration",
+        "stability" : "provisional"
+      },
+      {
+        "contractVersion" : 1,
+        "identifier" : "dense-linear-algebra",
+        "stability" : "stable"
+      },
+      {
+        "contractVersion" : 1,
+        "identifier" : "engineering-models",
+        "stability" : "provisional"
+      },
+      {
+        "contractVersion" : 1,
+        "identifier" : "fem",
+        "stability" : "provisional"
+      },
+      {
+        "contractVersion" : 1,
+        "identifier" : "global-minlp",
+        "stability" : "experimental"
+      },
+      {
+        "contractVersion" : 1,
+        "identifier" : "iterative-linear-solvers",
+        "stability" : "stable"
+      },
+      {
+        "contractVersion" : 1,
+        "identifier" : "lp-qp-milp",
+        "stability" : "stable"
+      },
+      {
+        "contractVersion" : 1,
+        "identifier" : "multiphysics-design",
+        "stability" : "experimental"
+      },
+      {
+        "contractVersion" : 1,
+        "identifier" : "nonlinear-equations",
+        "stability" : "provisional"
+      },
+      {
+        "contractVersion" : 1,
+        "identifier" : "nonlinear-optimization",
+        "stability" : "stable"
+      },
+      {
+        "contractVersion" : 1,
+        "identifier" : "numerical-validation",
+        "stability" : "stable"
+      },
+      {
+        "contractVersion" : 1,
+        "identifier" : "sparse-linear-algebra",
+        "stability" : "stable"
+      }
+    ],
+    "capabilityDigest" : "ec90eff05cfdcbad",
+    "compatibilityEpoch" : 1,
+    "manifestSchemaVersion" : 1,
+    "rustNumericCoreVersion" : "0.34.0",
+    "swiftNumericCoreVersion" : "1.0.0"
+  },
+  "passed" : true,
+  "schemaVersion" : 2,
+  "suite" : "meshlab-consolidation"
+}

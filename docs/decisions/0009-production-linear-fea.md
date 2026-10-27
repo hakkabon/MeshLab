@@ -62,9 +62,10 @@ compliance, nonlinear behavior, contact, fatigue, or automatic safety factors.
 
 - Gmsh physical surfaces and volumes can drive repeatable analysis definitions
   without copying node or element indices into project files.
-- Combination solves currently assemble and factor independently. This favors
-  correctness and existing solver diagnostics; common-stiffness multi-right-
-  hand-side reuse is the next performance optimization.
+- Superseded by ADR 0013: assembled production studies now prepare and factor
+  one common stiffness system for every load case and combination. Explicit
+  matrix-free studies preserve their element-operator path and therefore rebuild
+  that operator for each right-hand side.
 - Region total forces are nodal distributions, not consistent pressure or
   traction integration. Face traction authoring remains available through
   explicit `Load.traction` values.
@@ -73,11 +74,9 @@ compliance, nonlinear behavior, contact, fatigue, or automatic safety factors.
 
 ## Follow-ups
 
-- Reuse one NumericCore symbolic/numeric factorization across compatible load
-  cases and solve multiple right-hand sides in one production run.
 - Add workbench editors for region constraints, materials, load cases, and
-  combinations; the current UI runs and reviews definitions authored through
-  the public API or project JSON.
+  combinations beyond ADR 0013's bounded create/remove workflow, including
+  detailed vector, factor, axis, and material editing.
 - Add signed principal stress, tensor-component, reaction-table, and envelope
   CSV exports.
 - Add convergence studies and error estimators before claiming mesh-independent

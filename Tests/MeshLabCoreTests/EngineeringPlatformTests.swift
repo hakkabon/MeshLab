@@ -89,24 +89,24 @@ private func qualificationProject() throws -> MeshLabProject {
     }
 }
 
-@Test func schemaNineRoundTripsAndDefaultsPlatformFieldsFromVersionEight() throws {
+@Test func schemaTenRoundTripsAndDefaultsUnitsFromVersionNine() throws {
     var project = try qualificationProject()
     project.engineeringRequirements.maximumDisplacement = 0.01
     let data = try MeshLabProjectFile.encode(project)
     let decoded = try MeshLabProjectFile.decode(data)
     #expect(decoded == project)
-    #expect(decoded.schemaVersion == 9)
+    #expect(decoded.schemaVersion == 10)
 
     var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-    object["schemaVersion"] = 8
-    object.removeValue(forKey: "engineeringMetadata")
-    object.removeValue(forKey: "engineeringRequirements")
+    object["schemaVersion"] = 9
+    object.removeValue(forKey: "engineeringUnits")
+    object.removeValue(forKey: "transientStudy")
     let migrated = try MeshLabProjectFile.decode(
         try JSONSerialization.data(withJSONObject: object)
     )
-    #expect(migrated.schemaVersion == 8)
-    #expect(migrated.engineeringMetadata == EngineeringProjectMetadata())
-    #expect(migrated.engineeringRequirements == EngineeringRequirements())
+    #expect(migrated.schemaVersion == 9)
+    #expect(migrated.engineeringUnits == .si)
+    #expect(migrated.transientStudy == TransientStudy())
 }
 
 @Test func engineeringFingerprintChangesWithControlledProjectRevision() throws {

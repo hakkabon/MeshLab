@@ -173,6 +173,19 @@ public final class SparseSolver {
         return try backend.solve(rhs)
     }
 
+    /// Solves several right-hand sides through the same prepared backend.
+    /// Direct methods reuse their symbolic and numerical factorization; iterative
+    /// methods reuse the converted sparse matrix and configured preconditioner.
+    public func solveMultipleWithReports(
+        _ rightHandSides: [[Double]]
+    ) throws -> [SparseSolveReport] {
+        try rightHandSides.map { try solveWithReport($0) }
+    }
+
+    public func solveMultiple(_ rightHandSides: [[Double]]) throws -> [[Double]] {
+        try solveMultipleWithReports(rightHandSides).map(\.solution)
+    }
+
     public func refactor(with matrix: SparseMatrix) throws {
         guard matrix.rowCount == size, matrix.columnCount == size else {
             throw SparseSolverError.dimensionMismatch
