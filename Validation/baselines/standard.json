@@ -288,6 +288,45 @@
     },
     {
       "category" : "design",
+      "identifier" : "scalable-robust-design-contract",
+      "metrics" : [
+        {
+          "absoluteTolerance" : 0,
+          "name" : "scenario-analyses",
+          "observed" : 4,
+          "passed" : true,
+          "reference" : 4,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 0,
+          "name" : "best-candidate",
+          "observed" : 1,
+          "passed" : true,
+          "reference" : 1,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 0,
+          "name" : "full-reliability",
+          "observed" : 1,
+          "passed" : true,
+          "reference" : 1,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 0,
+          "name" : "artifact-identity",
+          "observed" : 1,
+          "passed" : true,
+          "reference" : 1,
+          "relativeTolerance" : 0
+        }
+      ],
+      "passed" : true
+    },
+    {
+      "category" : "design",
       "identifier" : "constrained-parametric-pareto",
       "metrics" : [
         {

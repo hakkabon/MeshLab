@@ -582,6 +582,31 @@ final class WorkbenchModel: ObservableObject {
     func setDesignKind(_ kind: DesignStudyKind) {
         guard project.designStudy.kind != kind else { return }
         project.designStudy.kind = kind
+        if kind == .robust, project.designStudy.robust.axes.isEmpty {
+            project.designStudy.robust.axes = [
+                ParametricAxis(
+                    parameter: .youngModulus,
+                    values: [
+                        project.material.youngModulus * 0.8,
+                        project.material.youngModulus,
+                        project.material.youngModulus * 1.2,
+                    ]
+                ),
+            ]
+            project.designStudy.robust.scenarios = [
+                DesignUncertaintyScenario(
+                    id: "low-load-high-stiffness",
+                    loadMultiplier: 0.9,
+                    youngModulusMultiplier: 1.05
+                ),
+                DesignUncertaintyScenario(id: "nominal"),
+                DesignUncertaintyScenario(
+                    id: "high-load-low-stiffness",
+                    loadMultiplier: 1.1,
+                    youngModulusMultiplier: 0.95
+                ),
+            ]
+        }
         if kind == .shape {
             let lastAxis = max(project.mesh.dimension - 1, 0)
             project.designStudy.shape.selectionAxis = min(
@@ -841,6 +866,15 @@ final class WorkbenchModel: ObservableObject {
                 scene = RenderScene(
                     surface: surface,
                     result: parametric.bestResult,
+                    revision: revision
+                )
+            case .robust(let robust):
+                let surface = try robust.bestModel.mesh.makeSurfaceMesh()
+                designMesh = robust.bestModel.mesh
+                designStaticResult = robust.bestResult
+                scene = RenderScene(
+                    surface: surface,
+                    result: robust.bestResult,
                     revision: revision
                 )
             case .topology(let topology):

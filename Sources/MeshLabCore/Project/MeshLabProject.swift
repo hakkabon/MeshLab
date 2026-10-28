@@ -140,7 +140,7 @@ public struct ThermalStudy: Sendable, Hashable, Codable {
 /// The project owns the mesh and analysis definition. Display settings travel
 /// with the document so reopening a project restores the same review state.
 public struct MeshLabProject: Sendable, Equatable, Codable {
-    public static let currentSchemaVersion = 13
+    public static let currentSchemaVersion = 14
 
     public var schemaVersion: Int
     public var name: String
@@ -527,6 +527,36 @@ public enum AnalysisResultExport {
                     number(sample.maxDisplacement),
                     number(sample.maxVonMises),
                     number(sample.strainEnergy),
+                ]).joined(separator: ","))
+            }
+            return rows.joined(separator: "\n") + "\n"
+
+        case .robust(let value):
+            let parameters = value.axes.map { $0.parameter.rawValue }
+            var rows = [
+                (["candidate", "feasible", "pareto", "reliability"] + parameters + [
+                    "robustObjective", "meanCompliance", "sigmaCompliance",
+                    "worstCompliance", "meanDisplacement", "sigmaDisplacement",
+                    "worstDisplacement", "meanVonMises", "sigmaVonMises",
+                    "worstVonMises",
+                ]).joined(separator: ","),
+            ]
+            let pareto = Set(value.paretoIndices)
+            for candidate in value.candidates {
+                rows.append(([
+                    String(candidate.index), String(candidate.isFeasible),
+                    String(pareto.contains(candidate.index)), number(candidate.reliability),
+                ] + candidate.values.map(number) + [
+                    number(candidate.robustObjective),
+                    number(candidate.compliance.mean),
+                    number(candidate.compliance.standardDeviation),
+                    number(candidate.compliance.worst),
+                    number(candidate.maxDisplacement.mean),
+                    number(candidate.maxDisplacement.standardDeviation),
+                    number(candidate.maxDisplacement.worst),
+                    number(candidate.maxVonMises.mean),
+                    number(candidate.maxVonMises.standardDeviation),
+                    number(candidate.maxVonMises.worst),
                 ]).joined(separator: ","))
             }
             return rows.joined(separator: "\n") + "\n"

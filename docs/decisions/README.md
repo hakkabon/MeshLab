@@ -22,6 +22,7 @@ relationship to the NumericCore ecosystem.
 | [0015](0015-p11b-nonlinear-production-depth.md) | Accepted | Add sparse adaptive Newton equilibrium, hyperelasticity, committed J2 plasticity, plane contact, prescribed motion, and schema v12. |
 | [0016](0016-p11c-dynamics-and-multiphysics.md) | Accepted | Add implicit transient conduction, temperature-history Newmark coupling, transient thermo-mechanics, and schema v13. |
 | [0017](0017-p11d-scale-and-execution.md) | Accepted | Add deterministic execution shards, atomic request checkpoints, fail-closed result merging, and content artifact identities. |
+| [0018](0018-p12-scalable-design-engineering.md) | Accepted | Add scenario-based robust design, weighted response statistics, reliability constraints, distributed reduction, and schema v14. |
 
 When a decision changes, add a new ADR that supersedes the old one rather than
 silently rewriting history.

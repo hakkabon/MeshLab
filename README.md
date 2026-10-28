@@ -240,7 +240,22 @@ distribution:
 - deterministic validation covers request coverage, unique shard assignment,
   and shared job identity.
 
-The package has 124 tests covering vector/dense/sparse math, mesh topology and
+P12 (scalable design engineering) is complete for scenario-based robust design:
+
+- discrete design candidates combine with weighted load and stiffness
+  uncertainty scenarios to form traceable engineering ensembles;
+- every candidate/scenario pair is an ordinary P11D request, enabling durable
+  shards, checkpoints, resume, merge, and content-addressed result identity;
+- reduction reports weighted mean, population deviation, and worst-case
+  compliance, displacement, and von Mises stress;
+- response limits produce weighted reliability, while the robust objective
+  minimizes `mean + variabilityWeight * sigma` over reliable candidates;
+- robust candidates include a deterministic mean-response Pareto set and CSV
+  evidence, with workbench and batch-worker integration;
+- schema v14 persists robust axes, scenarios, response limits, reliability,
+  and risk preference with safe v1--v13 migration.
+
+The package has 128 tests covering vector/dense/sparse math, mesh topology and
 surface extraction, linear-static FEM equilibrium, solver backends and
 factorization reuse, modal/transient dynamics, thermal conduction and thermal
 stress, parametric sweeps, compliance adjoints, topology/shape optimization,
@@ -501,9 +516,10 @@ the environment it was captured on.
 - No document-based autosave or signed/templated PDF report generation yet;
   qualification reports are deterministic JSON and Markdown.
 - Gmsh import remains ASCII-only; binary Gmsh and OBJ/STL/CAD are not
-  implemented. Project schema v12 files are not readable by older clients.
-- Design optimization is limited to linear-static compliance with homogeneous
-  Dirichlet constraints and no thermal loading.
+  implemented. Project schema v14 files are not readable by older clients.
+- Topology and shape optimization remain limited to linear-static compliance
+  with homogeneous Dirichlet constraints and no thermal loading. Robust design
+  currently uses discrete load and Young's-modulus scenarios.
 - Topology optimization reports densities but does not render a density field;
   shape optimization moves nodes on one selected face and has no
   manufacturability constraints.
@@ -519,9 +535,9 @@ the environment it was captured on.
   remains API/JSON based.
 - NumericCore's MPS backend is not yet usable, so no GPU numerical path is
   shipped. The matrix-free CPU path is the current scale-out option.
-- Batch sweeps hold the full job and result set in memory. Resume operates at
-  request boundaries; there are no mid-analysis checkpoints, artifact storage,
-  remote coordination, or authentication.
+- Batch sweeps hold each shard and result set in memory. Resume/checkpoints
+  operate at request boundaries; there are no mid-analysis checkpoints, remote
+  artifact storage, coordination leases, or authentication.
 - Qualification artifacts are deterministic evidence rather than cryptographic
   attestations: they are not signed, timestamped, or stored in an immutable
   artifact service.
@@ -612,10 +628,13 @@ Scripts/
 - **P11D — Scale and execution (complete):** deterministic distributed shards,
   atomic request-boundary checkpoints, fail-closed merging, content artifact
   identities, CLI execution controls, and deterministic validation.
-- **P12 — Coupled acceleration:** released NumericCore
-  operator/Krylov APIs, generalized-alpha and nonlinear transient mechanics,
-  monolithic field Jacobians, Metal/MPS numerical paths, distributed artifacts,
-  and mid-request checkpoints.
+- **P12 — Scalable design engineering (complete):** weighted uncertainty
+  scenarios, robust response statistics and reliability, risk-aware candidate
+  selection, P11D shard/reduction integration, CSV/workbench evidence, schema
+  v14, and deterministic validation.
+- **P13 — Coupled acceleration:** released NumericCore operator/Krylov APIs,
+  generalized-alpha and nonlinear transient mechanics, monolithic field
+  Jacobians, Metal/MPS numerical paths, and mid-analysis checkpoints.
 
 ## Contributing
 

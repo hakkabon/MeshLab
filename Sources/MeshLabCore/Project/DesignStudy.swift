@@ -3,6 +3,7 @@ import simd
 
 public enum DesignStudyKind: String, Sendable, Hashable, Codable, CaseIterable {
     case parametric
+    case robust
     case topology
     case shape
 }
@@ -116,24 +117,44 @@ public struct ShapeStudy: Sendable, Hashable, Codable {
 public struct DesignStudy: Sendable, Hashable, Codable {
     public var kind: DesignStudyKind
     public var parametric: ParametricStudy
+    public var robust: RobustDesignStudy
     public var topology: TopologyStudy
     public var shape: ShapeStudy
 
     public init(
         kind: DesignStudyKind = .parametric,
         parametric: ParametricStudy = ParametricStudy(axes: []),
+        robust: RobustDesignStudy = RobustDesignStudy(),
         topology: TopologyStudy = TopologyStudy(),
         shape: ShapeStudy = ShapeStudy()
     ) {
         self.kind = kind
         self.parametric = parametric
+        self.robust = robust
         self.topology = topology
         self.shape = shape
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, parametric, robust, topology, shape
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            kind: try values.decode(DesignStudyKind.self, forKey: .kind),
+            parametric: try values.decode(ParametricStudy.self, forKey: .parametric),
+            robust: try values.decodeIfPresent(RobustDesignStudy.self, forKey: .robust)
+                ?? RobustDesignStudy(),
+            topology: try values.decode(TopologyStudy.self, forKey: .topology),
+            shape: try values.decode(ShapeStudy.self, forKey: .shape)
+        )
     }
 }
 
 public enum DesignRunResult: Sendable {
     case parametric(ParametricResult)
+    case robust(RobustDesignResult)
     case topology(TopologyResult)
     case shape(ShapeResult)
 }
@@ -143,6 +164,8 @@ public extension DesignStudy {
         switch kind {
         case .parametric:
             return .parametric(try parametric.solve(project))
+        case .robust:
+            return .robust(try robust.solve(project))
         case .topology:
             let options = topology.makeOptions(
                 analysisOptions: project.makeAnalysisOptions()

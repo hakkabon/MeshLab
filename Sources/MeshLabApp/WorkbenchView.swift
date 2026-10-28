@@ -314,7 +314,31 @@ struct WorkbenchView: View {
                         "Pareto metrics",
                         value: study.paretoObjectives.map(\.title).joined(separator: ", ")
                     )
-
+                case .robust:
+                    LabeledContent(
+                        "Design candidates",
+                        value: "\(model.project.designStudy.robust.axes.reduce(1) { $0 * max(1, $1.values.count) })"
+                    )
+                    LabeledContent(
+                        "Uncertainty scenarios",
+                        value: "\(model.project.designStudy.robust.scenarios.count)"
+                    )
+                    LabeledContent("Minimum reliability") {
+                        TextField(
+                            "Reliability",
+                            value: $model.project.designStudy.robust.minimumReliability,
+                            format: .percent
+                        )
+                        .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Variability weight") {
+                        TextField(
+                            "Sigma weight",
+                            value: $model.project.designStudy.robust.variabilityWeight,
+                            format: .number
+                        )
+                        .multilineTextAlignment(.trailing)
+                    }
                 case .topology:
                     LabeledContent(
                         "Volume target",
@@ -1025,6 +1049,37 @@ struct WorkbenchView: View {
             }
             designTimeRow
 
+        case .robust(let result):
+            LabeledContent(
+                "Best candidate",
+                value: "#\(result.bestIndex + 1) of \(result.candidates.count)"
+            )
+            LabeledContent("Scenarios", value: "\(result.scenarios.count)")
+            LabeledContent("Pareto candidates", value: "\(result.paretoIndices.count)")
+            if let best = result.best {
+                LabeledContent(
+                    "Reliability",
+                    value: String(format: "%.1f%%", best.reliability * 100)
+                )
+                LabeledContent(
+                    "Robust objective",
+                    value: String(format: "%.6g", best.robustObjective)
+                )
+                LabeledContent(
+                    "Mean compliance",
+                    value: String(format: "%.6g J", best.compliance.mean)
+                )
+                LabeledContent(
+                    "Compliance deviation",
+                    value: String(format: "%.6g J", best.compliance.standardDeviation)
+                )
+                LabeledContent(
+                    "Worst displacement",
+                    value: String(format: "%.4g mm", best.maxDisplacement.worst * 1_000)
+                )
+            }
+            designTimeRow
+
         case .topology(let result):
             LabeledContent(
                 "Final compliance",
@@ -1446,6 +1501,7 @@ private extension DesignStudyKind {
     var title: String {
         switch self {
         case .parametric: return "Parametric sweep"
+        case .robust: return "Robust parametric"
         case .topology: return "Topology optimization"
         case .shape: return "Shape optimization"
         }

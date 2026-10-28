@@ -17,6 +17,7 @@ import Testing
         "nonlinear-production-contract",
         "transient-multiphysics-contract",
         "scalable-execution-contract",
+        "scalable-robust-design-contract",
         "constrained-parametric-pareto",
         "qualified-static-artifact",
     ])

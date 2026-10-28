@@ -84,7 +84,7 @@ private func transientThermalFixture() throws -> (Mesh, ElasticMaterial) {
     )
     let encoded = try MeshLabProjectFile.encode(project)
     let decoded = try MeshLabProjectFile.decode(encoded)
-    #expect(decoded.schemaVersion == 13)
+    #expect(decoded.schemaVersion == MeshLabProject.currentSchemaVersion)
     #expect(decoded.transientStudy == project.transientStudy)
 
     var object = try #require(

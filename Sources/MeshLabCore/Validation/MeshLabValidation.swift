@@ -150,6 +150,7 @@ public enum MeshLabValidation {
             try nonlinearProductionCase(),
             try transientMultiphysicsCase(),
             try scalableExecutionCase(),
+            try scalableRobustDesignCase(),
             try constrainedDesignCase(),
             try engineeringQualificationCase(),
         ])
@@ -536,6 +537,52 @@ public enum MeshLabValidation {
                     name: "best-index",
                     observed: Double(result.bestIndex),
                     reference: 0,
+                    absoluteTolerance: 0
+                ),
+            ]
+        )
+    }
+
+    private static func scalableRobustDesignCase() throws -> ValidationCase {
+        let project = try MeshLabProject.cantileverExample()
+        let study = RobustDesignStudy(
+            axes: [ParametricAxis(
+                parameter: .youngModulus,
+                values: [project.material.youngModulus, project.material.youngModulus * 2]
+            )],
+            scenarios: [
+                DesignUncertaintyScenario(id: "low", loadMultiplier: 0.8),
+                DesignUncertaintyScenario(id: "high", loadMultiplier: 1.2),
+            ],
+            variabilityWeight: 1
+        )
+        let result = try study.solve(project)
+        return ValidationCase(
+            identifier: "scalable-robust-design-contract",
+            category: "design",
+            metrics: [
+                ValidationMetric(
+                    name: "scenario-analyses",
+                    observed: Double(result.sweepResult.summaries.count),
+                    reference: 4,
+                    absoluteTolerance: 0
+                ),
+                ValidationMetric(
+                    name: "best-candidate",
+                    observed: Double(result.bestIndex),
+                    reference: 1,
+                    absoluteTolerance: 0
+                ),
+                ValidationMetric(
+                    name: "full-reliability",
+                    observed: result.best?.reliability ?? 0,
+                    reference: 1,
+                    absoluteTolerance: 0
+                ),
+                ValidationMetric(
+                    name: "artifact-identity",
+                    observed: result.sweepResult.artifactID == nil ? 0 : 1,
+                    reference: 1,
                     absoluteTolerance: 0
                 ),
             ]

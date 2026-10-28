@@ -537,6 +537,12 @@ public enum SweepRunner {
             maxVonMises = result.best?.maxVonMises
             strainEnergy = result.best?.strainEnergy
             finalCompliance = result.best?.compliance
+        case .robust(let result):
+            bestParametricIndex = result.bestIndex
+            maxDisplacement = result.best?.maxDisplacement.mean
+            maxVonMises = result.best?.maxVonMises.mean
+            strainEnergy = result.best.map { $0.compliance.mean * 0.5 }
+            finalCompliance = result.best?.compliance.mean
         case .topology(let result):
             finalCompliance = result.finalCompliance
             volumeFraction = result.volumeFraction
