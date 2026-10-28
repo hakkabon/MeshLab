@@ -149,6 +149,7 @@ public enum MeshLabValidation {
             try finiteStrainSmallLoadCase(),
             try nonlinearProductionCase(),
             try transientMultiphysicsCase(),
+            try scalableExecutionCase(),
             try constrainedDesignCase(),
             try engineeringQualificationCase(),
         ])
@@ -535,6 +536,42 @@ public enum MeshLabValidation {
                     name: "best-index",
                     observed: Double(result.bestIndex),
                     reference: 0,
+                    absoluteTolerance: 0
+                ),
+            ]
+        )
+    }
+
+    private static func scalableExecutionCase() throws -> ValidationCase {
+        let project = try MeshLabProject.cantileverExample()
+        let job = SweepJob(name: "validation-shards", requests: (0..<5).map {
+            SweepRequest(id: "request-\($0)", project: project)
+        })
+        let shards = try (0..<3).map {
+            try SweepRunner.makeShard(job, index: $0, count: 3)
+        }
+        let ids = shards.flatMap { $0.job.requests.map(\.id) }
+        let fingerprint = SweepRunner.jobFingerprint(job)
+        return ValidationCase(
+            identifier: "scalable-execution-contract",
+            category: "execution",
+            metrics: [
+                ValidationMetric(
+                    name: "request-coverage",
+                    observed: Double(ids.count),
+                    reference: 5,
+                    absoluteTolerance: 0
+                ),
+                ValidationMetric(
+                    name: "unique-assignment",
+                    observed: Double(Set(ids).count),
+                    reference: 5,
+                    absoluteTolerance: 0
+                ),
+                ValidationMetric(
+                    name: "shared-job-identity",
+                    observed: shards.allSatisfy { $0.jobFingerprint == fingerprint } ? 1 : 0,
+                    reference: 1,
                     absoluteTolerance: 0
                 ),
             ]

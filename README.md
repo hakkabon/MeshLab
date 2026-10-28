@@ -224,7 +224,23 @@ engineering on the released numerical stack:
 - deterministic validation covers the transient time grid, sparse residual,
   and dissipative thermal-energy contract.
 
-The package has 121 tests covering vector/dense/sparse math, mesh topology and
+P11D (scale and execution) is complete for durable, coordinator-free batch
+distribution:
+
+- deterministic job fingerprints and request sharding divide work without
+  overlap while preserving the full job definition;
+- request completion publishes monotonic partial checkpoints, and
+  `MeshLabSweep` persists each checkpoint atomically;
+- shard merging fails closed on foreign, duplicate, missing, or modified
+  requests and restores original request order;
+- result artifacts carry a timing-independent content identity so equivalent
+  executions converge even when concurrency or shard placement differs;
+- the CLI supports `--checkpoint`, deterministic `--shard-index` /
+  `--shard-count`, and repeatable `--merge-result` inputs;
+- deterministic validation covers request coverage, unique shard assignment,
+  and shared job identity.
+
+The package has 124 tests covering vector/dense/sparse math, mesh topology and
 surface extraction, linear-static FEM equilibrium, solver backends and
 factorization reuse, modal/transient dynamics, thermal conduction and thermal
 stress, parametric sweeps, compliance adjoints, topology/shape optimization,
@@ -593,7 +609,10 @@ Scripts/
   transfer, temperature-history Newmark loading, sequential transient
   thermo-mechanics, schema v13, batch/qualification/workbench integration, and
   deterministic validation.
-- **P12 — Coupled acceleration and scale:** released NumericCore
+- **P11D — Scale and execution (complete):** deterministic distributed shards,
+  atomic request-boundary checkpoints, fail-closed merging, content artifact
+  identities, CLI execution controls, and deterministic validation.
+- **P12 — Coupled acceleration:** released NumericCore
   operator/Krylov APIs, generalized-alpha and nonlinear transient mechanics,
   monolithic field Jacobians, Metal/MPS numerical paths, distributed artifacts,
   and mid-request checkpoints.

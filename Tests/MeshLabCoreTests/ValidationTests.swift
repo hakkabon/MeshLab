@@ -16,6 +16,7 @@ import Testing
         "finite-strain-small-load",
         "nonlinear-production-contract",
         "transient-multiphysics-contract",
+        "scalable-execution-contract",
         "constrained-parametric-pareto",
         "qualified-static-artifact",
     ])

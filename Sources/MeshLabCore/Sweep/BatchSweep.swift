@@ -65,6 +65,49 @@ public struct SweepBatchResult: Sendable, Hashable, Codable {
     public let summaries: [SweepSummary]
     public var resumedRequestCount: Int? = nil
     public var executedRequestCount: Int? = nil
+    /// Deterministic identity of the complete, unsharded job definition.
+    public var jobFingerprint: String? = nil
+    public var shardIndex: Int? = nil
+    public var shardCount: Int? = nil
+    /// Content identity of ordered numerical outcomes; excludes wall-clock time.
+    public var artifactID: String? = nil
+}
+
+public struct SweepCheckpoint: Sendable, Hashable, Codable {
+    public let sequence: Int
+    public let completedRequestCount: Int
+    public let totalRequestCount: Int
+    public let result: SweepBatchResult
+}
+
+public enum SweepExecutionError: Error, Equatable, Sendable {
+    case invalidShard(index: Int, count: Int)
+    case incompatibleResult(String)
+    case duplicateRequest(String)
+    case missingRequest(String)
+}
+
+public struct SweepShard: Sendable, Codable {
+    public let job: SweepJob
+    public let jobFingerprint: String
+    public let index: Int
+    public let count: Int
+}
+
+private struct SweepArtifactRecord: Encodable {
+    let id: String
+    let requestFingerprint: String?
+    let status: SweepStatus
+    let error: String?
+    let maxDisplacement: Double?
+    let maxVonMises: Double?
+    let strainEnergy: Double?
+    let maxTemperature: Double?
+    let modeCount: Int?
+    let bestParametricIndex: Int?
+    let finalCompliance: Double?
+    let volumeFraction: Double?
+    let iterations: Int?
 }
 
 /// Runs a sweep request without throwing. Failures travel as structured
@@ -118,26 +161,53 @@ public enum SweepRunner {
         _ job: SweepJob,
         maxConcurrency: Int = max(1, ProcessInfo.processInfo.activeProcessorCount),
         resuming previous: SweepBatchResult? = nil,
-        retryFailures: Bool = false
+        retryFailures: Bool = false,
+        shardIndex: Int = 0,
+        shardCount: Int = 1,
+        checkpoint: (@Sendable (SweepCheckpoint) async -> Void)? = nil
     ) async -> SweepBatchResult {
         let started = Date()
-        guard !job.requests.isEmpty else {
-            return SweepBatchResult(
+        let completeJobFingerprint = jobFingerprint(job)
+        let shard: SweepShard
+        do {
+            shard = try makeShard(job, index: shardIndex, count: shardCount)
+        } catch {
+            var failed = SweepBatchResult(
                 name: job.name,
                 elapsedSeconds: Date().timeIntervalSince(started),
                 summaries: [],
                 resumedRequestCount: 0,
                 executedRequestCount: 0
             )
+            failed.jobFingerprint = completeJobFingerprint
+            failed.shardIndex = shardIndex
+            failed.shardCount = shardCount
+            failed.artifactID = artifactID(failed)
+            return failed
+        }
+        let executionJob = shard.job
+        guard !executionJob.requests.isEmpty else {
+            var empty = SweepBatchResult(
+                name: job.name,
+                elapsedSeconds: Date().timeIntervalSince(started),
+                summaries: [],
+                resumedRequestCount: 0,
+                executedRequestCount: 0
+            )
+            empty.jobFingerprint = completeJobFingerprint
+            empty.shardIndex = shardIndex
+            empty.shardCount = shardCount
+            empty.artifactID = artifactID(empty)
+            return empty
         }
         var summaries = [SweepSummary?](
             repeating: nil,
-            count: job.requests.count
+            count: executionJob.requests.count
         )
         let previousByID = Dictionary(grouping: previous?.summaries ?? [], by: \.id)
         var pending: [Int] = []
         var resumed = 0
-        for (index, request) in job.requests.enumerated() {
+        for (index, request) in executionJob.requests.enumerated() {
             let fingerprint = fingerprint(request)
             let reusable = previousByID[request.id]?.first {
                 $0.requestFingerprint == fingerprint
@@ -151,20 +221,25 @@ public enum SweepRunner {
             }
         }
         guard !pending.isEmpty else {
-            return SweepBatchResult(
+            var result = SweepBatchResult(
                 name: job.name,
                 elapsedSeconds: Date().timeIntervalSince(started),
                 summaries: summaries.compactMap { $0 },
                 resumedRequestCount: resumed,
                 executedRequestCount: 0
             )
+            result.jobFingerprint = completeJobFingerprint
+            result.shardIndex = shardIndex
+            result.shardCount = shardCount
+            result.artifactID = artifactID(result)
+            return result
         }
         let limit = max(1, min(maxConcurrency, pending.count))
         await withTaskGroup(of: (Int, SweepSummary).self) { group in
             var next = 0
             func add(_ pendingIndex: Int) {
                 let index = pending[pendingIndex]
-                let request = job.requests[index]
+                let request = executionJob.requests[index]
                 group.addTask {
                     (index, SweepRunner.run(request))
                 }
@@ -175,27 +250,147 @@ public enum SweepRunner {
             }
             while let (index, summary) = await group.next() {
                 summaries[index] = summary
+                if let checkpoint {
+                    var partial = SweepBatchResult(
+                        name: job.name,
+                        elapsedSeconds: Date().timeIntervalSince(started),
+                        summaries: summaries.compactMap { $0 },
+                        resumedRequestCount: resumed,
+                        executedRequestCount: summaries.compactMap { $0 }.count - resumed
+                    )
+                    partial.jobFingerprint = completeJobFingerprint
+                    partial.shardIndex = shardIndex
+                    partial.shardCount = shardCount
+                    partial.artifactID = artifactID(partial)
+                    await checkpoint(SweepCheckpoint(
+                        sequence: summaries.compactMap { $0 }.count,
+                        completedRequestCount: summaries.compactMap { $0 }.count,
+                        totalRequestCount: executionJob.requests.count,
+                        result: partial
+                    ))
+                }
                 if next < pending.count {
                     add(next)
                     next += 1
                 }
             }
         }
-        return SweepBatchResult(
+        var result = SweepBatchResult(
             name: job.name,
             elapsedSeconds: Date().timeIntervalSince(started),
             summaries: summaries.compactMap { $0 },
             resumedRequestCount: resumed,
             executedRequestCount: pending.count
         )
+        result.jobFingerprint = completeJobFingerprint
+        result.shardIndex = shardIndex
+        result.shardCount = shardCount
+        result.artifactID = artifactID(result)
+        return result
+    }
+
+    /// Stable job identity including request order and all project definitions.
+    public static func jobFingerprint(_ job: SweepJob) -> String {
+        stableHash(job, fallback: job.name)
+    }
+
+    /// Partitions requests by request identity. The assignment is independent
+    /// of worker count, scheduling order, or process lifetime.
+    public static func makeShard(
+        _ job: SweepJob,
+        index: Int,
+        count: Int
+    ) throws -> SweepShard {
+        guard count > 0, index >= 0, index < count else {
+            throw SweepExecutionError.invalidShard(index: index, count: count)
+        }
+        let selected = job.requests.filter { request in
+            let value = UInt64(fingerprint(request), radix: 16) ?? 0
+            return Int(value % UInt64(count)) == index
+        }
+        return SweepShard(
+            job: SweepJob(name: job.name, requests: selected),
+            jobFingerprint: jobFingerprint(job),
+            index: index,
+            count: count
+        )
+    }
+
+    /// Merges independently executed shards into original request order.
+    public static func merge(
+        _ results: [SweepBatchResult],
+        for job: SweepJob
+    ) throws -> SweepBatchResult {
+        let expectedFingerprint = jobFingerprint(job)
+        var byID: [String: SweepSummary] = [:]
+        for result in results {
+            guard result.jobFingerprint == expectedFingerprint else {
+                throw SweepExecutionError.incompatibleResult(result.name)
+            }
+            for summary in result.summaries {
+                guard byID[summary.id] == nil else {
+                    throw SweepExecutionError.duplicateRequest(summary.id)
+                }
+                byID[summary.id] = summary
+            }
+        }
+        let ordered = try job.requests.map { request in
+            guard let summary = byID[request.id],
+                  summary.requestFingerprint == fingerprint(request) else {
+                throw SweepExecutionError.missingRequest(request.id)
+            }
+            return summary
+        }
+        var merged = SweepBatchResult(
+            name: job.name,
+            elapsedSeconds: results.map(\.elapsedSeconds).max() ?? 0,
+            summaries: ordered,
+            resumedRequestCount: results.compactMap(\.resumedRequestCount).reduce(0, +),
+            executedRequestCount: results.compactMap(\.executedRequestCount).reduce(0, +)
+        )
+        merged.jobFingerprint = expectedFingerprint
+        merged.shardIndex = nil
+        merged.shardCount = results.first?.shardCount
+        merged.artifactID = artifactID(merged)
+        return merged
+    }
+
+    /// Deterministic identity for result content. Timing and shard placement
+    /// are intentionally excluded so equivalent executions converge.
+    public static func artifactID(_ result: SweepBatchResult) -> String {
+        let records = result.summaries.map { summary in
+            SweepArtifactRecord(
+                id: summary.id,
+                requestFingerprint: summary.requestFingerprint,
+                status: summary.status,
+                error: summary.error,
+                maxDisplacement: summary.maxDisplacement,
+                maxVonMises: summary.maxVonMises,
+                strainEnergy: summary.strainEnergy,
+                maxTemperature: summary.maxTemperature,
+                modeCount: summary.modeCount,
+                bestParametricIndex: summary.bestParametricIndex,
+                finalCompliance: summary.finalCompliance,
+                volumeFraction: summary.volumeFraction,
+                iterations: summary.iterations
+            )
+        }
+        return stableHash(records, fallback: result.name)
     }
 
     /// Deterministic request identity used by resumable workers. FNV-1a keeps
     /// the format dependency-free; this is an identity guard, not a security hash.
     public static func fingerprint(_ request: SweepRequest) -> String {
+        stableHash(request, fallback: request.id)
+    }
+
+    private static func stableHash<Value: Encodable>(
+        _ value: Value,
+        fallback: String
+    ) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        let data = (try? encoder.encode(request)) ?? Data(request.id.utf8)
+        let data = (try? encoder.encode(value)) ?? Data(fallback.utf8)
         var hash: UInt64 = 14_695_981_039_346_656_037
         for byte in data {
             hash ^= UInt64(byte)

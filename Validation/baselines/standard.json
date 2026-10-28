@@ -256,6 +256,37 @@
       "passed" : true
     },
     {
+      "category" : "execution",
+      "identifier" : "scalable-execution-contract",
+      "metrics" : [
+        {
+          "absoluteTolerance" : 0,
+          "name" : "request-coverage",
+          "observed" : 5,
+          "passed" : true,
+          "reference" : 5,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 0,
+          "name" : "unique-assignment",
+          "observed" : 5,
+          "passed" : true,
+          "reference" : 5,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 0,
+          "name" : "shared-job-identity",
+          "observed" : 1,
+          "passed" : true,
+          "reference" : 1,
+          "relativeTolerance" : 0
+        }
+      ],
+      "passed" : true
+    },
+    {
       "category" : "design",
       "identifier" : "constrained-parametric-pareto",
       "metrics" : [
