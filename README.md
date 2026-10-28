@@ -206,7 +206,25 @@ current `tet4` finite-strain formulation:
 - schema v12 persists the nonlinear law, stepping controls, plastic parameters,
   and contact definitions, with workbench model selection and retry reporting.
 
-The package has 118 tests covering vector/dense/sparse math, mesh topology and
+P11C (dynamics and multiphysics) is complete for transient thermal-structural
+engineering on the released numerical stack:
+
+- consistent scalar heat-capacity matrices support all integrated continuum
+  elements and implicit backward-Euler or Crank--Nicolson conduction;
+- constant thermal and structural effective matrices are factorized once and
+  reused across their respective time histories through the NumericCore sparse
+  solver facade;
+- Newmark dynamics accepts a nodal temperature history and assembles thermal
+  strain forces at every time state;
+- sequential transient thermo-mechanics shares one mesh and time grid, retains
+  absolute temperature in each structural state, and is available to batch,
+  qualification, and workbench flows;
+- schema v13 persists heat capacity, integration choice, heat histories,
+  initial temperature, and the coupling switch with safe v1--v12 migration;
+- deterministic validation covers the transient time grid, sparse residual,
+  and dissipative thermal-energy contract.
+
+The package has 121 tests covering vector/dense/sparse math, mesh topology and
 surface extraction, linear-static FEM equilibrium, solver backends and
 factorization reuse, modal/transient dynamics, thermal conduction and thermal
 stress, parametric sweeps, compliance adjoints, topology/shape optimization,
@@ -571,10 +589,14 @@ Scripts/
 - **P11B — Nonlinear production depth (complete):** sparse Newton assembly,
   adaptive cutback/growth, Neo-Hookean elasticity, committed J2 hardening,
   frictionless plane contact, nonzero prescribed motion, and schema v12.
-- **P11C — Coupled physics and acceleration:** released NumericCore
-  operator/Krylov and sparse-modal APIs, arc-length continuation, general
-  contact and finite plasticity, monolithic/transient multiphysics, Metal/MPS
-  numerical paths, distributed artifacts, and mid-request checkpoints.
+- **P11C — Dynamics and multiphysics (complete):** implicit transient heat
+  transfer, temperature-history Newmark loading, sequential transient
+  thermo-mechanics, schema v13, batch/qualification/workbench integration, and
+  deterministic validation.
+- **P12 — Coupled acceleration and scale:** released NumericCore
+  operator/Krylov APIs, generalized-alpha and nonlinear transient mechanics,
+  monolithic field Jacobians, Metal/MPS numerical paths, distributed artifacts,
+  and mid-request checkpoints.
 
 ## Contributing
 

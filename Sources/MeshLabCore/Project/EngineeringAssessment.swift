@@ -307,11 +307,30 @@ public enum EngineeringAssessment {
             )
 
         case .transient:
-            let value = try TransientAnalysis(options: project.makeTransientOptions())
-                .solve(
-                    project.makeModel(),
-                    loadHistory: project.makeTransientLoadHistory()
+            let value: TransientResult
+            var maximumTemperature: Double?
+            if project.transientStudy.thermalCoupling {
+                let coupled = try TransientThermoMechanicalAnalysis(
+                    thermalOptions: project.makeTransientThermalOptions(),
+                    structuralOptions: project.makeTransientOptions(),
+                    analysisOptions: project.makeAnalysisOptions(),
+                    referenceTemperature: project.thermalStudy.referenceTemperature
+                ).solve(
+                    thermal: project.makeThermalModel(),
+                    structural: project.makeModel(),
+                    loadHistory: project.makeTransientLoadHistory(),
+                    heatFactors: project.makeTransientHeatFactors(),
+                    initialTemperature: project.transientStudy.initialTemperature
                 )
+                value = coupled.structural
+                maximumTemperature = coupled.thermal.states.map(\.maximumTemperature).max()
+            } else {
+                value = try TransientAnalysis(options: project.makeTransientOptions())
+                    .solve(
+                        project.makeModel(),
+                        loadHistory: project.makeTransientLoadHistory()
+                    )
+            }
             let maximumDisplacement = value.states.flatMap(\.displacement).reduce(0.0) {
                 max($0, simd_length($1))
             }
@@ -319,7 +338,7 @@ public enum EngineeringAssessment {
                 maximumDisplacement: maximumDisplacement,
                 maximumVonMises: nil,
                 strainEnergy: value.states.map(\.strainEnergy).max(),
-                maximumTemperature: nil,
+                maximumTemperature: maximumTemperature,
                 minimumFrequency: nil,
                 maximumRelativeResidual: value.maximumRelativeEquilibriumResidual,
                 converged: value.states.count == project.transientStudy.steps + 1

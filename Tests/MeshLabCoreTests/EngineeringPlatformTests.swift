@@ -95,7 +95,7 @@ private func qualificationProject() throws -> MeshLabProject {
     let data = try MeshLabProjectFile.encode(project)
     let decoded = try MeshLabProjectFile.decode(data)
     #expect(decoded == project)
-    #expect(decoded.schemaVersion == 12)
+    #expect(decoded.schemaVersion == MeshLabProject.currentSchemaVersion)
 
     var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
     object["schemaVersion"] = 9

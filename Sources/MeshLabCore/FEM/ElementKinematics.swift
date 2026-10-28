@@ -136,6 +136,37 @@ public struct ElementKinematics: Sendable {
         return result
     }
 
+    /// Consistent scalar capacity matrix for heat or other nodal scalar fields.
+    /// The coefficient is normally volumetric heat capacity `rho * c`.
+    public func scalarCapacity(coefficient: Double) -> [Double] {
+        precondition(
+            coefficient.isFinite && coefficient >= 0,
+            "Capacity coefficient must be finite and non-negative"
+        )
+        let nodeCount = nodeIndices.count
+        if elementType == .tetrahedron4 || elementType == .triangle3 {
+            let denominator = elementType == .tetrahedron4 ? 20.0 : 12.0
+            let scale = coefficient * measure / denominator
+            return (0..<nodeCount).flatMap { first in
+                (0..<nodeCount).map { second in
+                    scale * (first == second ? 2 : 1)
+                }
+            }
+        }
+        var result = [Double](repeating: 0, count: nodeCount * nodeCount)
+        for point in integrationPoints {
+            for first in 0..<nodeCount {
+                for second in 0..<nodeCount {
+                    result[first * nodeCount + second] += coefficient
+                        * point.weightedMeasure
+                        * point.shapeValues[first]
+                        * point.shapeValues[second]
+                }
+            }
+        }
+        return result
+    }
+
     /// Steady-conduction element matrix for an isotropic conductivity.
     public func thermalStiffness(conductivity: Double) -> [Double] {
         precondition(

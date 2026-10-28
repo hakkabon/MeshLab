@@ -217,6 +217,45 @@
       "passed" : true
     },
     {
+      "category" : "transient-multiphysics",
+      "identifier" : "transient-multiphysics-contract",
+      "metrics" : [
+        {
+          "absoluteTolerance" : 0,
+          "name" : "state-count",
+          "observed" : 3,
+          "passed" : true,
+          "reference" : 3,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 1e-15,
+          "name" : "final-time",
+          "observed" : 0.2,
+          "passed" : true,
+          "reference" : 0.2,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 1e-10,
+          "name" : "relative-residual",
+          "observed" : 2.5106945362634364e-16,
+          "passed" : true,
+          "reference" : 0,
+          "relativeTolerance" : 0
+        },
+        {
+          "absoluteTolerance" : 0,
+          "name" : "energy-dissipated",
+          "observed" : 1,
+          "passed" : true,
+          "reference" : 1,
+          "relativeTolerance" : 0
+        }
+      ],
+      "passed" : true
+    },
+    {
       "category" : "design",
       "identifier" : "constrained-parametric-pareto",
       "metrics" : [

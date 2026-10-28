@@ -148,6 +148,7 @@ public enum MeshLabValidation {
             try meshQualityCase(),
             try finiteStrainSmallLoadCase(),
             try nonlinearProductionCase(),
+            try transientMultiphysicsCase(),
             try constrainedDesignCase(),
             try engineeringQualificationCase(),
         ])
@@ -534,6 +535,62 @@ public enum MeshLabValidation {
                     name: "best-index",
                     observed: Double(result.bestIndex),
                     reference: 0,
+                    absoluteTolerance: 0
+                ),
+            ]
+        )
+    }
+
+    private static func transientMultiphysicsCase() throws -> ValidationCase {
+        let mesh = try MeshGenerators.structuredBox(
+            size: SIMD3<Double>(1, 1, 1),
+            divisions: SIMD3<Int>(1, 1, 2)
+        )
+        let material = try ElasticMaterial(
+            youngModulus: 1e7,
+            poissonRatio: 0.3,
+            density: 1_000,
+            thermalConductivity: 10,
+            thermalExpansion: 1e-5
+        )
+        let constraints = mesh.nodeIndices { abs($0.z) < 1e-12 }
+            .map { ThermalConstraint(node: $0, temperature: 0) }
+        let initial = mesh.nodes.map { $0.z == 0 ? 0.0 : 100.0 }
+        let result = try TransientThermalAnalysis(options: TransientThermalOptions(
+            timeStep: 0.1,
+            steps: 2,
+            volumetricHeatCapacity: 100
+        )).solve(
+            ThermalModel(mesh: mesh, material: material, constraints: constraints),
+            initialTemperature: initial
+        )
+        return ValidationCase(
+            identifier: "transient-multiphysics-contract",
+            category: "transient-multiphysics",
+            metrics: [
+                ValidationMetric(
+                    name: "state-count",
+                    observed: Double(result.states.count),
+                    reference: 3,
+                    absoluteTolerance: 0
+                ),
+                ValidationMetric(
+                    name: "final-time",
+                    observed: result.states.last?.time ?? 0,
+                    reference: 0.2,
+                    absoluteTolerance: 1e-15
+                ),
+                ValidationMetric(
+                    name: "relative-residual",
+                    observed: result.maximumRelativeResidual,
+                    reference: 0,
+                    absoluteTolerance: 1e-10
+                ),
+                ValidationMetric(
+                    name: "energy-dissipated",
+                    observed: result.states.last!.thermalEnergy
+                        < result.states.first!.thermalEnergy ? 1 : 0,
+                    reference: 1,
                     absoluteTolerance: 0
                 ),
             ]

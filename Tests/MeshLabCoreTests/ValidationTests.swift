@@ -15,6 +15,7 @@ import Testing
         "structured-mesh-quality",
         "finite-strain-small-load",
         "nonlinear-production-contract",
+        "transient-multiphysics-contract",
         "constrained-parametric-pareto",
         "qualified-static-artifact",
     ])

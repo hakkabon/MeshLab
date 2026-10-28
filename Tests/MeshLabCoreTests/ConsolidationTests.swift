@@ -108,7 +108,9 @@ import simd
         .solve(project.makeModel(), loadHistory: project.makeTransientLoadHistory())
     #expect(result.states.count == 3)
     let csv = AnalysisResultExport.transientCSV(project: project, result: result)
-    #expect(csv.hasPrefix("step,time,node,x,y,z,ux,uy,uz,vx,vy,vz,ax,ay,az\n"))
+    #expect(csv.hasPrefix(
+        "step,time,node,x,y,z,ux,uy,uz,vx,vy,vz,ax,ay,az,temperature\n"
+    ))
     let artifact = try EngineeringAssessment.run(project)
     #expect(artifact.passed)
     #expect(artifact.result.maximumDisplacement != nil)

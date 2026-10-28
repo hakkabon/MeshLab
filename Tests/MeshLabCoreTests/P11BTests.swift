@@ -103,7 +103,7 @@ private func p11bTetra(load: Double, modulus: Double = 1e7) throws -> FEMModel {
     let data = try MeshLabProjectFile.encode(project)
     let decoded = try MeshLabProjectFile.decode(data)
     #expect(decoded == project)
-    #expect(decoded.schemaVersion == 12)
+    #expect(decoded.schemaVersion == MeshLabProject.currentSchemaVersion)
 
     var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
     object["schemaVersion"] = 11

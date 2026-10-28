@@ -167,7 +167,9 @@ final class WorkbenchModel: ObservableObject {
                 position: displayMesh.nodes[node],
                 displacement: state.displacement[node],
                 vonMises: nil,
-                temperature: nil,
+                temperature: state.temperatures.flatMap {
+                    $0.indices.contains(node) ? $0[node] : nil
+                },
                 modeFrequency: nil
             )
         }
@@ -934,12 +936,23 @@ final class WorkbenchModel: ObservableObject {
             return .modal(result)
 
         case .transient:
-            return .transient(try TransientAnalysis(
-                options: project.makeTransientOptions()
-            ).solve(
-                project.makeModel(),
-                loadHistory: project.makeTransientLoadHistory()
-            ))
+            if project.transientStudy.thermalCoupling {
+                let coupled = try TransientThermoMechanicalAnalysis(
+                    thermalOptions: project.makeTransientThermalOptions(),
+                    structuralOptions: project.makeTransientOptions(),
+                    analysisOptions: project.makeAnalysisOptions(),
+                    referenceTemperature: project.thermalStudy.referenceTemperature
+                ).solve(
+                    thermal: project.makeThermalModel(),
+                    structural: project.makeModel(),
+                    loadHistory: project.makeTransientLoadHistory(),
+                    heatFactors: project.makeTransientHeatFactors(),
+                    initialTemperature: project.transientStudy.initialTemperature
+                )
+                return .transient(coupled.structural)
+            }
+            return .transient(try TransientAnalysis(options: project.makeTransientOptions())
+                .solve(project.makeModel(), loadHistory: project.makeTransientLoadHistory()))
 
         case .thermalStructural:
             let thermal = try ThermalAnalysis(options: project.makeAnalysisOptions())

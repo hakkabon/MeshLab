@@ -22,19 +22,63 @@ public struct TransientStudy: Sendable, Hashable, Codable {
     public var stiffnessDamping: Double
     /// Optional scale at times zero through `steps`. Empty selects a unit step.
     public var loadFactors: [Double]
+    /// Integrate heat transfer and apply its thermal strain at every dynamic step.
+    public var thermalCoupling: Bool
+    public var volumetricHeatCapacity: Double
+    public var thermalTheta: Double
+    /// Optional heat-source scale at times zero through `steps`.
+    public var heatFactors: [Double]
+    /// Optional absolute nodal temperature at time zero.
+    public var initialTemperature: [Double]
 
     public init(
         timeStep: Double = 0.01,
         steps: Int = 100,
         massDamping: Double = 0,
         stiffnessDamping: Double = 0,
-        loadFactors: [Double] = []
+        loadFactors: [Double] = [],
+        thermalCoupling: Bool = false,
+        volumetricHeatCapacity: Double = 3.5e6,
+        thermalTheta: Double = 1,
+        heatFactors: [Double] = [],
+        initialTemperature: [Double] = []
     ) {
         self.timeStep = timeStep
         self.steps = steps
         self.massDamping = massDamping
         self.stiffnessDamping = stiffnessDamping
         self.loadFactors = loadFactors
+        self.thermalCoupling = thermalCoupling
+        self.volumetricHeatCapacity = volumetricHeatCapacity
+        self.thermalTheta = thermalTheta
+        self.heatFactors = heatFactors
+        self.initialTemperature = initialTemperature
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case timeStep, steps, massDamping, stiffnessDamping, loadFactors
+        case thermalCoupling, volumetricHeatCapacity, thermalTheta
+        case heatFactors, initialTemperature
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            timeStep: try values.decode(Double.self, forKey: .timeStep),
+            steps: try values.decode(Int.self, forKey: .steps),
+            massDamping: try values.decode(Double.self, forKey: .massDamping),
+            stiffnessDamping: try values.decode(Double.self, forKey: .stiffnessDamping),
+            loadFactors: try values.decodeIfPresent([Double].self, forKey: .loadFactors) ?? [],
+            thermalCoupling: try values.decodeIfPresent(Bool.self, forKey: .thermalCoupling) ?? false,
+            volumetricHeatCapacity: try values.decodeIfPresent(
+                Double.self, forKey: .volumetricHeatCapacity
+            ) ?? 3.5e6,
+            thermalTheta: try values.decodeIfPresent(Double.self, forKey: .thermalTheta) ?? 1,
+            heatFactors: try values.decodeIfPresent([Double].self, forKey: .heatFactors) ?? [],
+            initialTemperature: try values.decodeIfPresent(
+                [Double].self, forKey: .initialTemperature
+            ) ?? []
+        )
     }
 }
 
@@ -96,7 +140,7 @@ public struct ThermalStudy: Sendable, Hashable, Codable {
 /// The project owns the mesh and analysis definition. Display settings travel
 /// with the document so reopening a project restores the same review state.
 public struct MeshLabProject: Sendable, Equatable, Codable {
-    public static let currentSchemaVersion = 12
+    public static let currentSchemaVersion = 13
 
     public var schemaVersion: Int
     public var name: String
@@ -357,6 +401,28 @@ public struct MeshLabProject: Sendable, Equatable, Codable {
         )
     }
 
+    public func makeTransientThermalOptions() -> TransientThermalOptions {
+        TransientThermalOptions(
+            timeStep: transientStudy.timeStep,
+            steps: transientStudy.steps,
+            volumetricHeatCapacity: transientStudy.volumetricHeatCapacity,
+            theta: transientStudy.thermalTheta
+        )
+    }
+
+    public func makeTransientHeatFactors() throws -> [Double] {
+        let factors = transientStudy.heatFactors.isEmpty
+            ? [Double](repeating: 1, count: transientStudy.steps + 1)
+            : transientStudy.heatFactors
+        guard factors.count == transientStudy.steps + 1,
+              factors.allSatisfy(\.isFinite) else {
+            throw FEMError.invalidModel(
+                "Transient heat factors must contain steps + 1 finite values"
+            )
+        }
+        return factors
+    }
+
     public func makeTransientLoadHistory() throws -> [[Load]] {
         guard transientStudy.steps > 0 else {
             throw FEMError.invalidModel("Transient step count must be positive")
@@ -569,7 +635,7 @@ public enum AnalysisResultExport {
         project: MeshLabProject,
         result: TransientResult
     ) -> String {
-        var rows = ["step,time,node,x,y,z,ux,uy,uz,vx,vy,vz,ax,ay,az"]
+        var rows = ["step,time,node,x,y,z,ux,uy,uz,vx,vy,vz,ax,ay,az,temperature"]
         rows.reserveCapacity(result.states.count * project.mesh.nodes.count + 1)
         for (step, state) in result.states.enumerated() {
             for node in project.mesh.nodes.indices {
@@ -583,6 +649,9 @@ public enum AnalysisResultExport {
                     number(displacement.x), number(displacement.y), number(displacement.z),
                     number(velocity.x), number(velocity.y), number(velocity.z),
                     number(acceleration.x), number(acceleration.y), number(acceleration.z),
+                    state.temperatures.flatMap {
+                        $0.indices.contains(node) ? number($0[node]) : nil
+                    } ?? "",
                 ].joined(separator: ","))
             }
         }

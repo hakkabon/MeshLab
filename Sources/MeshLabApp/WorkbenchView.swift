@@ -156,6 +156,10 @@ struct WorkbenchView: View {
                     }
                 }
                 if model.project.analysis == .transient {
+                    Toggle(
+                        "Transient thermal coupling",
+                        isOn: $model.project.transientStudy.thermalCoupling
+                    )
                     LabeledContent("Time step (s)") {
                         TextField(
                             "Time step",
@@ -174,6 +178,23 @@ struct WorkbenchView: View {
                         model.project.transientStudy.timeStep
                             * Double(model.project.transientStudy.steps)
                     ))
+                    if model.project.transientStudy.thermalCoupling {
+                        LabeledContent("Heat capacity (J/m³K)") {
+                            TextField(
+                                "Heat capacity",
+                                value: $model.project.transientStudy.volumetricHeatCapacity,
+                                format: .number
+                            )
+                            .multilineTextAlignment(.trailing)
+                        }
+                        Picker(
+                            "Thermal integrator",
+                            selection: $model.project.transientStudy.thermalTheta
+                        ) {
+                            Text("Backward Euler").tag(1.0)
+                            Text("Crank–Nicolson").tag(0.5)
+                        }
+                    }
                 }
                 if model.project.analysis == .productionLinear {
                     LabeledContent(
@@ -914,6 +935,15 @@ struct WorkbenchView: View {
                             "Strain energy",
                             value: String(format: "%.6g J", state.strainEnergy)
                         )
+                        if let temperatures = state.temperatures {
+                            LabeledContent(
+                                "Max temperature",
+                                value: String(
+                                    format: "%.6g K",
+                                    temperatures.max() ?? 0
+                                )
+                            )
+                        }
                         LabeledContent(
                             "Max equilibrium residual",
                             value: String(

@@ -20,6 +20,7 @@ relationship to the NumericCore ecosystem.
 | [0013](0013-p10-5-verification-and-shared-contracts.md) | Accepted | Add exact NumericCore provenance, validation baselines, prepared linear systems, unit-aware qualification, element contracts, and transient/product workflow consolidation. |
 | [0014](0014-p11a-elements-and-interoperability.md) | Accepted | Add higher-order solids, structural kernels, surface physics, sparse modal extraction, modern interchange, convergence estimation, and schema v11. |
 | [0015](0015-p11b-nonlinear-production-depth.md) | Accepted | Add sparse adaptive Newton equilibrium, hyperelasticity, committed J2 plasticity, plane contact, prescribed motion, and schema v12. |
+| [0016](0016-p11c-dynamics-and-multiphysics.md) | Accepted | Add implicit transient conduction, temperature-history Newmark coupling, transient thermo-mechanics, and schema v13. |
 
 When a decision changes, add a new ADR that supersedes the old one rather than
 silently rewriting history.

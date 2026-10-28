@@ -271,6 +271,8 @@ public struct TransientState: Sendable {
     public let displacement: [SIMD3<Double>]
     public let velocity: [SIMD3<Double>]
     public let acceleration: [SIMD3<Double>]
+    /// Nodal absolute temperature when produced by transient thermo-mechanics.
+    public let temperatures: [Double]?
     public let kineticEnergy: Double
     public let strainEnergy: Double
 }
@@ -296,6 +298,7 @@ public struct TransientAnalysis: Sendable {
     public func solve(
         _ model: FEMModel,
         loadHistory: [[Load]],
+        temperatureHistory: [[Double]] = [],
         initialDisplacement: [SIMD3<Double>] = [],
         initialVelocity: [SIMD3<Double>] = []
     ) throws -> TransientResult {
@@ -308,6 +311,16 @@ public struct TransientAnalysis: Sendable {
         guard loadHistory.count == options.steps + 1 else {
             throw FEMError.invalidModel(
                 "Load history must contain steps + 1 entries"
+            )
+        }
+        guard temperatureHistory.isEmpty || (
+            temperatureHistory.count == options.steps + 1
+                && temperatureHistory.allSatisfy {
+                    $0.count == model.mesh.nodes.count && $0.allSatisfy(\.isFinite)
+                }
+        ) else {
+            throw FEMError.invalidModel(
+                "Temperature history must contain steps + 1 finite nodal fields"
             )
         }
         guard !model.constraints.isEmpty else {
@@ -368,10 +381,20 @@ public struct TransientAnalysis: Sendable {
 
         var forces: [[Double]] = []
         forces.reserveCapacity(loadHistory.count)
-        for loads in loadHistory {
+        for (step, loads) in loadHistory.enumerated() {
             var loadModel = model
             loadModel.loads = loads
-            let full = try FEMAssembly.loadVector(loadModel)
+            if !temperatureHistory.isEmpty {
+                loadModel.temperatureChange = temperatureHistory[step]
+            }
+            var full = try FEMAssembly.loadVector(loadModel)
+            if !temperatureHistory.isEmpty {
+                let thermal = try FEMAssembly.thermalLoads(
+                    loadModel,
+                    kinematics: assembled.kinematics
+                ).loads
+                add(&full, thermal)
+            }
             forces.append(FEMAssembly.reduced(full, freeDOFs: free))
         }
 
@@ -410,7 +433,8 @@ public struct TransientAnalysis: Sendable {
             stiffness: reducedStiffness,
             free: free,
             nodeCount: model.mesh.nodes.count,
-            dimension: dimension
+            dimension: dimension,
+            temperatures: temperatureHistory.isEmpty ? nil : temperatureHistory[0]
         ))
 
         for step in 1...options.steps {
@@ -456,7 +480,8 @@ public struct TransientAnalysis: Sendable {
                 stiffness: reducedStiffness,
                 free: free,
                 nodeCount: model.mesh.nodes.count,
-                dimension: dimension
+                dimension: dimension,
+                temperatures: temperatureHistory.isEmpty ? nil : temperatureHistory[step]
             ))
         }
 
@@ -533,7 +558,8 @@ public struct TransientAnalysis: Sendable {
         stiffness: SparseMatrix,
         free: [Int],
         nodeCount: Int,
-        dimension: Int
+        dimension: Int,
+        temperatures: [Double]?
     ) -> TransientState {
         func reshape(_ values: [Double]) -> [SIMD3<Double>] {
             let full = FEMAssembly.full(
@@ -562,6 +588,7 @@ public struct TransientAnalysis: Sendable {
             displacement: reshape(u),
             velocity: reshape(v),
             acceleration: reshape(a),
+            temperatures: temperatures,
             kineticEnergy: kinetic,
             strainEnergy: strain
         )

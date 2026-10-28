@@ -259,11 +259,29 @@ public enum SweepRunner {
             strainEnergy = nil
 
         case .transient:
-            let result = try TransientAnalysis(options: project.makeTransientOptions())
-                .solve(
-                    project.makeModel(),
-                    loadHistory: project.makeTransientLoadHistory()
+            let result: TransientResult
+            if project.transientStudy.thermalCoupling {
+                let coupled = try TransientThermoMechanicalAnalysis(
+                    thermalOptions: project.makeTransientThermalOptions(),
+                    structuralOptions: project.makeTransientOptions(),
+                    analysisOptions: project.makeAnalysisOptions(),
+                    referenceTemperature: project.thermalStudy.referenceTemperature
+                ).solve(
+                    thermal: project.makeThermalModel(),
+                    structural: project.makeModel(),
+                    loadHistory: project.makeTransientLoadHistory(),
+                    heatFactors: project.makeTransientHeatFactors(),
+                    initialTemperature: project.transientStudy.initialTemperature
                 )
+                result = coupled.structural
+                maxTemperature = coupled.thermal.states.map(\.maximumTemperature).max()
+            } else {
+                result = try TransientAnalysis(options: project.makeTransientOptions())
+                    .solve(
+                        project.makeModel(),
+                        loadHistory: project.makeTransientLoadHistory()
+                    )
+            }
             maxDisplacement = result.states.flatMap(\.displacement).reduce(0.0) {
                 max($0, simd_length($1))
             }
